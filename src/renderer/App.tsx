@@ -423,6 +423,7 @@ export default function App() {
         onOpenChange={setActionPanelOpen}
         workspaceCollapsed={workspaceCollapsed}
         worktreeCollapsed={worktreeCollapsed}
+        projectPath={activeWorktree?.path || selectedRepo || undefined}
         onToggleWorkspace={() => setWorkspaceCollapsed((prev) => !prev)}
         onToggleWorktree={() => setWorktreeCollapsed((prev) => !prev)}
         onOpenSettings={() => setSettingsOpen(true)}

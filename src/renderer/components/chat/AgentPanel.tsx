@@ -3,7 +3,7 @@ import { useCallback, useEffect, useMemo, useState } from 'react';
 import { AgentTerminal } from './AgentTerminal';
 import { type Session, SessionBar } from './SessionBar';
 
-interface ChatPanelProps {
+interface AgentPanelProps {
   repoPath: string; // repository path (workspace identifier)
   cwd: string; // current worktree path
 }
@@ -85,7 +85,7 @@ function saveSessions(
   );
 }
 
-export function ChatPanel({ repoPath, cwd }: ChatPanelProps) {
+export function AgentPanel({ repoPath, cwd }: AgentPanelProps) {
   const { agentSettings, customAgents } = useSettingsStore();
   const defaultAgentId = useMemo(() => getDefaultAgentId(agentSettings), [agentSettings]);
 

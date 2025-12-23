@@ -1,5 +1,5 @@
 import { OpenInMenu } from '@/components/app/OpenInMenu';
-import { ChatPanel } from '@/components/chat/ChatPanel';
+import { AgentPanel } from '@/components/chat/AgentPanel';
 import { cn } from '@/lib/utils';
 import { AnimatePresence, motion } from 'framer-motion';
 import { FileCode, FolderOpen, GitBranch, Plus, Sparkles, Terminal } from 'lucide-react';
@@ -120,19 +120,12 @@ export function MainContent({
         </div>
       </header>
 
-      {/* Session info bar */}
-      {worktreePath && (
-        <div className="flex h-8 items-center border-b px-4 text-xs text-muted-foreground">
-          Session started with Claude in {worktreePath}
-        </div>
-      )}
-
       {/* Content */}
       <div className="relative flex-1 overflow-hidden">
         {/* Chat tab - keep mounted to preserve terminal session */}
         <div className={cn('absolute inset-0', activeTab !== 'chat' && 'invisible')}>
           {repoPath && worktreePath ? (
-            <ChatPanel repoPath={repoPath} cwd={worktreePath} />
+            <AgentPanel repoPath={repoPath} cwd={worktreePath} />
           ) : (
             <div className="flex h-full items-center justify-center text-muted-foreground">
               <p>请先选择一个 Worktree</p>
