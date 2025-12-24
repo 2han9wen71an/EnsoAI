@@ -3,7 +3,6 @@ import type {
   AgentCliStatus,
   AgentMetadata,
   CustomAgent,
-  DatabaseQueryResult,
   DetectedApp,
   FileChangeEvent,
   FileEntry,
@@ -122,14 +121,6 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.AGENT_MESSAGE, handler);
       return () => ipcRenderer.off(IPC_CHANNELS.AGENT_MESSAGE, handler);
     },
-  },
-
-  // Database
-  db: {
-    query: <T = unknown>(sql: string, params?: unknown[]): Promise<DatabaseQueryResult<T>> =>
-      ipcRenderer.invoke(IPC_CHANNELS.DB_QUERY, sql, params),
-    execute: (sql: string, params?: unknown[]): Promise<DatabaseQueryResult> =>
-      ipcRenderer.invoke(IPC_CHANNELS.DB_EXECUTE, sql, params),
   },
 
   // App
