@@ -81,29 +81,24 @@ export function GitView() {
     await pullMutation.mutateAsync({ workdir });
   };
 
-  const handleStageFile = async (path: string) => {
+  const handleStageFile = async (_path: string) => {
     // TODO: Implement file staging
-    console.log('Stage file:', path);
   };
 
-  const handleUnstageFile = async (path: string) => {
+  const handleUnstageFile = async (_path: string) => {
     // TODO: Implement file unstaging
-    console.log('Unstage file:', path);
   };
 
   const handleStageAll = async () => {
     // TODO: Implement stage all
-    console.log('Stage all');
   };
 
   const handleUnstageAll = async () => {
     // TODO: Implement unstage all
-    console.log('Unstage all');
   };
 
-  const handleViewFile = (path: string) => {
+  const handleViewFile = (_path: string) => {
     // TODO: Open file in editor/diff view
-    console.log('View file:', path);
   };
 
   if (!currentWorkspace) {

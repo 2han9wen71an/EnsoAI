@@ -263,10 +263,8 @@ export default function App() {
   };
 
   const handleAddRepository = async () => {
-    console.log('handleAddRepository called');
     try {
       const selectedPath = await window.electronAPI.dialog.openDirectory();
-      console.log('selectedPath:', selectedPath);
       if (!selectedPath) return;
 
       // Check if repo already exists

@@ -59,14 +59,12 @@ export function WorktreesView() {
     setCurrentWorktree(worktree);
   };
 
-  const handleOpenTerminal = (worktree: GitWorktree) => {
+  const handleOpenTerminal = (_worktree: GitWorktree) => {
     // TODO: Open terminal in worktree directory
-    console.log('Open terminal:', worktree.path);
   };
 
-  const handleOpenInFinder = (worktree: GitWorktree) => {
+  const handleOpenInFinder = (_worktree: GitWorktree) => {
     // TODO: Open in Finder/Explorer
-    console.log('Open in Finder:', worktree.path);
   };
 
   const handleCopyPath = (worktree: GitWorktree) => {

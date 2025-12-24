@@ -53,7 +53,10 @@ export function createMainWindow(): BrowserWindow {
     minHeight: 600,
     titleBarStyle: process.platform === "darwin" ? "hiddenInset" : "default",
     trafficLightPosition: { x: 16, y: 16 },
-    backgroundColor: "#1e1e1e",
+    transparent: true,
+    backgroundColor: "#00000000",
+    vibrancy: "under-window", // macOS frosted glass effect
+    visualEffectState: "active",
     show: false,
     webPreferences: {
       nodeIntegration: false,

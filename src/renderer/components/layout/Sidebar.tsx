@@ -29,12 +29,10 @@ export function Sidebar({ activeTab, onTabChange }: SidebarProps) {
 
   const handleCreateNewWorkspace = () => {
     // TODO: Open create workspace dialog
-    console.log('Create new workspace');
   };
 
   const handleOpenFolder = async () => {
     // TODO: Open folder picker via IPC
-    console.log('Open folder');
   };
 
   return (
