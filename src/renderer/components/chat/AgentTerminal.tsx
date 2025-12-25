@@ -159,7 +159,14 @@ export function AgentTerminal({
       if (event.type !== 'keydown') return true;
 
       // Detect Enter key press (without modifiers) to activate session and start idle monitoring
-      if (event.key === 'Enter' && !event.shiftKey && !event.ctrlKey && !event.altKey) {
+      // Skip if IME is composing (e.g. selecting Chinese characters)
+      if (
+        event.key === 'Enter' &&
+        !event.shiftKey &&
+        !event.ctrlKey &&
+        !event.altKey &&
+        !event.isComposing
+      ) {
         // 首次 Enter 激活 session
         if (!hasActivatedRef.current && !activated) {
           hasActivatedRef.current = true;
