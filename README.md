@@ -13,6 +13,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/J3n5en/EnsoAI/releases/latest"><img src="https://img.shields.io/github/v/release/J3n5en/EnsoAI?style=flat&color=blue" alt="Release" /></a>
   <img src="https://img.shields.io/badge/Electron-39+-47848F?logo=electron&logoColor=white" alt="Electron" />
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React" />
   <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
@@ -53,6 +54,8 @@ EnsoAI 是一款将 **Git Worktree 管理**与 **AI 编程助手**相结合的�
 - 即时切换 worktree
 - 删除 worktree 并可选择同时删除分支
 - 可视化 worktree 列表，显示分支状态
+
+![Worktree 管理](docs/assets/screenshot-worktree.png)
 
 #### 内置文件编辑器
 
@@ -107,20 +110,32 @@ EnsoAI 是一款将 **Git Worktree 管理**与 **AI 编程助手**相结合的�
 
 ### 安装
 
-#### 前置要求
+#### 下载
 
-- Node.js 20+
-- pnpm 10+
-- Git
+从 [GitHub Releases](https://github.com/J3n5en/EnsoAI/releases/latest) 下载适合你平台的安装包：
+
+| 平台 | 文件 |
+|------|------|
+| macOS (Apple Silicon) | `EnsoAI-x.x.x-arm64.dmg` |
+| macOS (Intel) | `EnsoAI-x.x.x.dmg` |
+| Windows (安装版) | `EnsoAI-Setup-x.x.x.exe` |
+| Windows (便携版) | `EnsoAI-x.x.x-portable.exe` |
+| Linux (AppImage) | `EnsoAI-x.x.x.AppImage` |
+| Linux (deb) | `ensoai_x.x.x_amd64.deb` |
+
+> ⚠️ **macOS 用户注意**：由于应用未签名，首次打开可能提示"已损坏"，请在终端执行：
+> ```bash
+> sudo xattr -dr com.apple.quarantine /Applications/EnsoAI.app
+> ```
 
 #### 从源码构建
 
 ```bash
 # 克隆仓库
-git clone https://github.com/your-username/EnsoAI.git
+git clone https://github.com/J3n5en/EnsoAI.git
 cd EnsoAI
 
-# 安装依赖
+# 安装依赖（需要 Node.js 20+、pnpm 10+）
 pnpm install
 
 # 开发模式运行

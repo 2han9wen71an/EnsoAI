@@ -13,6 +13,7 @@
 </p>
 
 <p align="center">
+  <a href="https://github.com/J3n5en/EnsoAI/releases/latest"><img src="https://img.shields.io/github/v/release/J3n5en/EnsoAI?style=flat&color=blue" alt="Release" /></a>
   <img src="https://img.shields.io/badge/Electron-39+-47848F?logo=electron&logoColor=white" alt="Electron" />
   <img src="https://img.shields.io/badge/React-19-61DAFB?logo=react&logoColor=white" alt="React" />
   <img src="https://img.shields.io/badge/TypeScript-5.9-3178C6?logo=typescript&logoColor=white" alt="TypeScript" />
@@ -54,6 +55,8 @@ Efficiently manage multiple worktrees in a single workspace:
 - Switch between worktrees instantly
 - Delete worktrees with optional branch cleanup
 - Visual worktree list with branch status
+
+![Worktree Management](docs/assets/screenshot-worktree.png)
 
 #### Integrated File Editor
 
@@ -108,20 +111,32 @@ Quick access to all actions via `Cmd+Shift+P`:
 
 ### Installation
 
-#### Prerequisites
+#### Download
 
-- Node.js 20+
-- pnpm 10+
-- Git
+Download the installer for your platform from [GitHub Releases](https://github.com/J3n5en/EnsoAI/releases/latest):
+
+| Platform | File |
+|----------|------|
+| macOS (Apple Silicon) | `EnsoAI-x.x.x-arm64.dmg` |
+| macOS (Intel) | `EnsoAI-x.x.x.dmg` |
+| Windows (Installer) | `EnsoAI-Setup-x.x.x.exe` |
+| Windows (Portable) | `EnsoAI-x.x.x-portable.exe` |
+| Linux (AppImage) | `EnsoAI-x.x.x.AppImage` |
+| Linux (deb) | `ensoai_x.x.x_amd64.deb` |
+
+> ⚠️ **macOS Users**: The app is not signed. If you see "damaged" warning, run in terminal:
+> ```bash
+> sudo xattr -dr com.apple.quarantine /Applications/EnsoAI.app
+> ```
 
 #### Build from Source
 
 ```bash
 # Clone the repository
-git clone https://github.com/your-username/EnsoAI.git
+git clone https://github.com/J3n5en/EnsoAI.git
 cd EnsoAI
 
-# Install dependencies
+# Install dependencies (requires Node.js 20+, pnpm 10+)
 pnpm install
 
 # Run in development mode
