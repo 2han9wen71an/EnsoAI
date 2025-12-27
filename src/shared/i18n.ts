@@ -488,6 +488,7 @@ export const zhTranslations: Record<string, string> = {
   'Enable Code Review': '启用代码审查',
   'Show code review button in source control': '在版本控制中显示代码审查按钮',
   'Claude model for code review': '用于代码审查的 Claude 模型',
+  'Language for code review output': '代码审查输出语言',
   Review: '审查',
   'Start code review': '开始代码审查',
   'Initializing...': '初始化中...',

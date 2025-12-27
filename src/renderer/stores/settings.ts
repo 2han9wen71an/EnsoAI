@@ -180,11 +180,13 @@ export type CodeReviewModel = 'opus' | 'sonnet' | 'haiku';
 export interface CodeReviewSettings {
   enabled: boolean;
   model: CodeReviewModel;
+  language: string;
 }
 
 export const defaultCodeReviewSettings: CodeReviewSettings = {
   enabled: true,
   model: 'haiku',
+  language: '中文',
 };
 
 // Editor settings

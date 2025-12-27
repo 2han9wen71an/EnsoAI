@@ -263,6 +263,22 @@ export function IntegrationSettings() {
                 <p className="text-xs text-muted-foreground">{t('Claude model for code review')}</p>
               </div>
             </div>
+
+            {/* Language */}
+            <div className="grid grid-cols-[140px_1fr] items-center gap-4">
+              <span className="text-sm font-medium">{t('Language')}</span>
+              <div className="space-y-1.5">
+                <Input
+                  value={codeReview.language}
+                  onChange={(e) => setCodeReview({ language: e.target.value })}
+                  placeholder="中文"
+                  className="w-32"
+                />
+                <p className="text-xs text-muted-foreground">
+                  {t('Language for code review output')}
+                </p>
+              </div>
+            </div>
           </div>
         )}
       </div>

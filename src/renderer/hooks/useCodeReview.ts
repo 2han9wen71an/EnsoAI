@@ -137,6 +137,7 @@ export function useCodeReview({ repoPath }: UseCodeReviewOptions): UseCodeReview
       // 启动代码审查
       const result = await window.electronAPI.git.startCodeReview(repoPath, {
         model: codeReviewSettings.model,
+        language: codeReviewSettings.language,
         reviewId,
       });
 
@@ -150,7 +151,14 @@ export function useCodeReview({ repoPath }: UseCodeReviewOptions): UseCodeReview
       setError(err instanceof Error ? err.message : 'Failed to start review');
       cleanup();
     }
-  }, [repoPath, cleanup, handleEvent, status, codeReviewSettings.model]);
+  }, [
+    repoPath,
+    cleanup,
+    handleEvent,
+    status,
+    codeReviewSettings.model,
+    codeReviewSettings.language,
+  ]);
 
   // 停止审查
   const stopReview = useCallback(() => {
