@@ -28,6 +28,7 @@ import {
   EmptyMedia,
   EmptyTitle,
 } from '@/components/ui/empty';
+import { toastManager } from '@/components/ui/toast';
 import { useGitPull, useGitPush, useGitStatus } from '@/hooks/useGit';
 import { useCommitDiff, useCommitFiles, useGitHistoryInfinite } from '@/hooks/useGitHistory';
 import { useFileChanges } from '@/hooks/useSourceControl';
@@ -105,18 +106,34 @@ export function SourceControlPanel({
     if (!rootPath || isSyncing) return;
 
     try {
+      let pulled = false;
+      let pushed = false;
+
       // Pull first if behind
       if (gitStatus?.behind && gitStatus.behind > 0) {
         await pullMutation.mutateAsync({ workdir: rootPath });
+        pulled = true;
       }
       // Then push if ahead
       if (gitStatus?.ahead && gitStatus.ahead > 0) {
         await pushMutation.mutateAsync({ workdir: rootPath });
+        pushed = true;
       }
       // Refetch all data after sync
       refetch();
       refetchCommits();
       refetchStatus();
+
+      // Show success toast
+      if (pulled || pushed) {
+        const actions = [pulled && t('Pulled'), pushed && t('Pushed')].filter(Boolean).join(' & ');
+        toastManager.add({
+          title: t('Sync completed'),
+          description: actions,
+          type: 'success',
+          timeout: 3000,
+        });
+      }
     } catch {
       // Errors are handled by mutation's onError
     }
@@ -129,6 +146,7 @@ export function SourceControlPanel({
     refetch,
     refetchCommits,
     refetchStatus,
+    t,
   ]);
 
   // Flatten infinite query data
