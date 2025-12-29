@@ -43,9 +43,12 @@ mac:
     - target: dmg
       arch: [arm64, x64]
   category: public.app-category.developer-tools
-  # Disable signing for now (requires Apple Developer account)
-  identity: null
   icon: build/icon.icns
+  hardenedRuntime: true
+  gatekeeperAssess: false
+  entitlements: build/entitlements.mac.plist
+  entitlementsInherit: build/entitlements.mac.plist
+  notarize: true
   # Register enso:// URL scheme
   extendInfo:
     CFBundleURLTypes:
@@ -54,7 +57,7 @@ mac:
           - enso
 
 dmg:
-  sign: false
+  sign: true
   contents:
     - x: 130
       y: 220
