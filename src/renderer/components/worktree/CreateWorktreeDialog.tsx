@@ -225,10 +225,10 @@ export function CreateWorktreeDialog({
       }
 
       try {
-        // First checkout the PR to create the local branch
-        await window.electronAPI.git.checkoutPullRequest(workdir, selectedPr.number, branchName);
+        // First fetch PR to local branch (without checkout)
+        await window.electronAPI.git.fetchPullRequest(workdir, selectedPr.number, branchName);
 
-        // Then create worktree from that branch
+        // Then create worktree from that branch (branch already exists, no newBranch needed)
         await onSubmit({
           path: getWorktreePath(branchName),
           branch: branchName,

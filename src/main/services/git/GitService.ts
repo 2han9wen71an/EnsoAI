@@ -487,26 +487,14 @@ export class GitService {
     }
   }
 
-  async checkoutPullRequest(prNumber: number, localBranch?: string): Promise<string> {
+  async fetchPullRequest(prNumber: number, localBranch: string): Promise<void> {
     try {
-      // Get PR info to get the branch name
-      const { stdout: prInfo } = await execAsync(`gh pr view ${prNumber} --json headRefName`, {
-        cwd: this.workdir,
-        env: { ...process.env, PATH: getEnhancedPath() },
-      });
-      const { headRefName } = JSON.parse(prInfo) as { headRefName: string };
-      const targetBranch = localBranch || headRefName;
-
-      // Checkout PR to local branch
-      await execAsync(`gh pr checkout ${prNumber} --branch ${targetBranch}`, {
-        cwd: this.workdir,
-        env: { ...process.env, PATH: getEnhancedPath() },
-      });
-
-      return targetBranch;
+      // Fetch PR head to local branch without checking out
+      // This creates the branch locally pointing to the PR's head commit
+      await this.git.fetch(['origin', `pull/${prNumber}/head:${localBranch}`]);
     } catch (error) {
       throw new Error(
-        `Failed to checkout PR #${prNumber}: ${error instanceof Error ? error.message : 'Unknown error'}`
+        `Failed to fetch PR #${prNumber}: ${error instanceof Error ? error.message : 'Unknown error'}`
       );
     }
   }

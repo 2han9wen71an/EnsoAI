@@ -127,12 +127,8 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.GIT_GH_STATUS, workdir),
     listPullRequests: (workdir: string): Promise<PullRequest[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.GIT_PR_LIST, workdir),
-    checkoutPullRequest: (
-      workdir: string,
-      prNumber: number,
-      localBranch?: string
-    ): Promise<string> =>
-      ipcRenderer.invoke(IPC_CHANNELS.GIT_PR_CHECKOUT, workdir, prNumber, localBranch),
+    fetchPullRequest: (workdir: string, prNumber: number, localBranch: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_PR_FETCH, workdir, prNumber, localBranch),
   },
 
   // Worktree

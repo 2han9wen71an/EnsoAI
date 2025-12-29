@@ -506,12 +506,12 @@ ${gitLog || '(No commit history available)'}`;
     return git.listPullRequests();
   });
 
-  // GitHub CLI - Checkout PR
+  // GitHub CLI - Fetch PR (without checkout)
   ipcMain.handle(
-    IPC_CHANNELS.GIT_PR_CHECKOUT,
-    async (_, workdir: string, prNumber: number, localBranch?: string) => {
+    IPC_CHANNELS.GIT_PR_FETCH,
+    async (_, workdir: string, prNumber: number, localBranch: string) => {
       const git = getGitService(workdir);
-      return git.checkoutPullRequest(prNumber, localBranch);
+      return git.fetchPullRequest(prNumber, localBranch);
     }
   );
 }
