@@ -8,7 +8,13 @@ import type {
 import { AnimatePresence, motion } from 'framer-motion';
 import { useCallback, useEffect, useState } from 'react';
 import { panelTransition, type Repository, type TabId } from './App/constants';
-import { getStoredBoolean, getStoredTabMap, pathsEqual, STORAGE_KEYS } from './App/storage';
+import {
+  getStoredBoolean,
+  getStoredTabMap,
+  getStoredWorktreeMap,
+  pathsEqual,
+  STORAGE_KEYS,
+} from './App/storage';
 import { useAppKeyboardShortcuts } from './App/useAppKeyboardShortcuts';
 import { usePanelResize } from './App/usePanelResize';
 import { ActionPanel } from './components/layout/ActionPanel';
@@ -49,6 +55,9 @@ export default function App() {
   const { t } = useI18n();
   // Per-worktree tab state: { [worktreePath]: TabId }
   const [worktreeTabMap, setWorktreeTabMap] = useState<Record<string, TabId>>(getStoredTabMap);
+  // Per-repo worktree state: { [repoPath]: worktreePath }
+  const [repoWorktreeMap, setRepoWorktreeMap] =
+    useState<Record<string, string>>(getStoredWorktreeMap);
   const [activeTab, setActiveTab] = useState<TabId>('chat');
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
@@ -214,7 +223,20 @@ export default function App() {
       setSelectedRepo(savedSelectedRepo);
     }
 
-    const savedWorktreePath = localStorage.getItem(STORAGE_KEYS.ACTIVE_WORKTREE);
+    // Migration: convert old single worktree to per-repo map
+    const oldWorktreePath = localStorage.getItem(STORAGE_KEYS.ACTIVE_WORKTREE);
+    const savedWorktreeMap = getStoredWorktreeMap();
+    if (oldWorktreePath && savedSelectedRepo && !savedWorktreeMap[savedSelectedRepo]) {
+      // Migrate old data to new format
+      const migrated = { ...savedWorktreeMap, [savedSelectedRepo]: oldWorktreePath };
+      localStorage.setItem(STORAGE_KEYS.ACTIVE_WORKTREES, JSON.stringify(migrated));
+      setRepoWorktreeMap(migrated);
+      localStorage.removeItem(STORAGE_KEYS.ACTIVE_WORKTREE);
+    }
+
+    // Restore worktree for selected repo
+    const worktreeMap = getStoredWorktreeMap();
+    const savedWorktreePath = savedSelectedRepo ? worktreeMap[savedSelectedRepo] : null;
     if (savedWorktreePath) {
       // Wait for worktrees to load before setting active worktree.
       setActiveWorktree({ path: savedWorktreePath } as GitWorktree);
@@ -271,14 +293,23 @@ export default function App() {
     }
   }, [selectedRepo]);
 
-  // Save active worktree to localStorage
+  // Save active worktree to per-repo map
   useEffect(() => {
-    if (activeWorktree) {
-      localStorage.setItem(STORAGE_KEYS.ACTIVE_WORKTREE, activeWorktree.path);
-    } else {
-      localStorage.removeItem(STORAGE_KEYS.ACTIVE_WORKTREE);
+    if (selectedRepo && activeWorktree) {
+      setRepoWorktreeMap((prev) => {
+        const updated = { ...prev, [selectedRepo]: activeWorktree.path };
+        localStorage.setItem(STORAGE_KEYS.ACTIVE_WORKTREES, JSON.stringify(updated));
+        return updated;
+      });
+    } else if (selectedRepo && !activeWorktree) {
+      setRepoWorktreeMap((prev) => {
+        const updated = { ...prev };
+        delete updated[selectedRepo];
+        localStorage.setItem(STORAGE_KEYS.ACTIVE_WORKTREES, JSON.stringify(updated));
+        return updated;
+      });
     }
-  }, [activeWorktree]);
+  }, [selectedRepo, activeWorktree]);
 
   // Sync editor state with active worktree
   const currentEditorWorktree = useEditorStore((s) => s.currentWorktreePath);
@@ -313,8 +344,27 @@ export default function App() {
   }, [worktrees, activeWorktree]);
 
   const handleSelectRepo = (repoPath: string) => {
+    // Save current worktree's tab state before switching
+    if (activeWorktree?.path) {
+      setWorktreeTabMap((prev) => ({
+        ...prev,
+        [activeWorktree.path]: activeTab,
+      }));
+    }
+
     setSelectedRepo(repoPath);
-    setActiveWorktree(null);
+    // Restore previously selected worktree for this repo
+    const savedWorktreePath = repoWorktreeMap[repoPath];
+    if (savedWorktreePath) {
+      // Set temporary worktree with just the path; full object synced after worktrees load
+      setActiveWorktree({ path: savedWorktreePath } as GitWorktree);
+      // Restore the tab state for this worktree
+      const savedTab = worktreeTabMap[savedWorktreePath] || 'chat';
+      setActiveTab(savedTab);
+    } else {
+      setActiveWorktree(null);
+      setActiveTab('chat');
+    }
     // Editor state will be synced by useEffect
   };
 

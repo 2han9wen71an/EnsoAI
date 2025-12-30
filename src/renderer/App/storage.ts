@@ -4,7 +4,8 @@ import type { TabId } from './constants';
 export const STORAGE_KEYS = {
   REPOSITORIES: 'enso-repositories',
   SELECTED_REPO: 'enso-selected-repo',
-  ACTIVE_WORKTREE: 'enso-active-worktree',
+  ACTIVE_WORKTREE: 'enso-active-worktree', // deprecated, kept for migration
+  ACTIVE_WORKTREES: 'enso-active-worktrees', // per-repo worktree map
   WORKTREE_TABS: 'enso-worktree-tabs',
   REPOSITORY_WIDTH: 'enso-repository-width',
   WORKTREE_WIDTH: 'enso-worktree-width',
@@ -28,6 +29,19 @@ export const getStoredTabMap = (): Record<string, TabId> => {
   if (saved) {
     try {
       return JSON.parse(saved) as Record<string, TabId>;
+    } catch {
+      return {};
+    }
+  }
+  return {};
+};
+
+// Per-repo worktree map: { [repoPath]: worktreePath }
+export const getStoredWorktreeMap = (): Record<string, string> => {
+  const saved = localStorage.getItem(STORAGE_KEYS.ACTIVE_WORKTREES);
+  if (saved) {
+    try {
+      return JSON.parse(saved) as Record<string, string>;
     } catch {
       return {};
     }
