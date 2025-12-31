@@ -22,6 +22,7 @@ const AGENT_INFO: Record<string, { name: string; command: string }> = {
   gemini: { name: 'Gemini', command: 'gemini' },
   auggie: { name: 'Auggie', command: 'auggie' },
   cursor: { name: 'Cursor', command: 'cursor-agent' },
+  opencode: { name: 'OpenCode', command: 'opencode' },
 };
 
 function getDefaultAgentId(
@@ -47,20 +48,17 @@ function createSession(
   repoPath: string,
   cwd: string,
   agentId: string,
-  customAgents: Array<{ id: string; name: string; command: string }>
+  customAgents: Array<{ id: string; name: string; command: string }>,
+  agentSettings: Record<
+    string,
+    { enabled: boolean; isDefault: boolean; customPath?: string; customArgs?: string }
+  >
 ): Session {
-  // Handle WSL, Hapi and Happy agent IDs
-  // e.g., 'codex-wsl' -> base is 'codex', 'claude-hapi' -> base is 'claude', 'claude-happy' -> base is 'claude'
-  const isWsl = agentId.endsWith('-wsl');
+  // Handle Hapi and Happy agent IDs
+  // e.g., 'claude-hapi' -> base is 'claude', 'claude-happy' -> base is 'claude'
   const isHapi = agentId.endsWith('-hapi');
   const isHappy = agentId.endsWith('-happy');
-  const baseId = isWsl
-    ? agentId.slice(0, -4)
-    : isHapi
-      ? agentId.slice(0, -5)
-      : isHappy
-        ? agentId.slice(0, -6)
-        : agentId;
+  const baseId = isHapi ? agentId.slice(0, -5) : isHappy ? agentId.slice(0, -6) : agentId;
 
   // Check if it's a custom agent
   const customAgent = customAgents.find((a) => a.id === baseId);
@@ -69,22 +67,23 @@ function createSession(
     : AGENT_INFO[baseId] || { name: 'Claude', command: 'claude' };
 
   // Build display name with environment suffix
-  const displayName = isWsl
-    ? `${info.name} (WSL)`
-    : isHapi
-      ? `${info.name} (Hapi)`
-      : isHappy
-        ? `${info.name} (Happy)`
-        : info.name;
+  const displayName = isHapi ? `${info.name} (Hapi)` : isHappy ? `${info.name} (Happy)` : info.name;
 
   // Determine environment
-  const environment = isWsl ? 'wsl' : isHapi ? 'hapi' : isHappy ? 'happy' : 'native';
+  const environment = isHapi ? 'hapi' : isHappy ? 'happy' : 'native';
+
+  // Get custom path and args from settings (for builtin agents)
+  const agentConfig = agentSettings[baseId];
+  const customPath = agentConfig?.customPath;
+  const customArgs = agentConfig?.customArgs;
 
   return {
     id: crypto.randomUUID(),
     name: displayName,
     agentId,
     agentCommand: info.command,
+    customPath,
+    customArgs,
     initialized: false,
     repoPath,
     cwd,
@@ -143,7 +142,13 @@ export function AgentPanel({ repoPath, cwd, isActive = false, onSwitchWorktree }
       const hasSession = allSessions.some((s) => s.repoPath === repoPath && s.cwd === cwd);
       if (!hasSession) {
         initializedWorktreesRef.current.add(worktreeKey);
-        const newSession = createSession(repoPath, cwd, defaultAgentId, customAgents);
+        const newSession = createSession(
+          repoPath,
+          cwd,
+          defaultAgentId,
+          customAgents,
+          agentSettings
+        );
         addSession(newSession);
       }
     }
@@ -153,6 +158,7 @@ export function AgentPanel({ repoPath, cwd, isActive = false, onSwitchWorktree }
     currentWorktreeSessions.length,
     defaultAgentId,
     customAgents,
+    agentSettings,
     allSessions,
     addSession,
   ]);
@@ -198,7 +204,8 @@ export function AgentPanel({ repoPath, cwd, isActive = false, onSwitchWorktree }
           sessionRepoPath,
           worktreePath,
           defaultAgentId,
-          customAgents
+          customAgents,
+          agentSettings
         );
         addSession(newSession);
       }
@@ -212,6 +219,7 @@ export function AgentPanel({ repoPath, cwd, isActive = false, onSwitchWorktree }
     registerAgentCloseHandler,
     defaultAgentId,
     customAgents,
+    agentSettings,
     setAgentCount,
     allSessions,
     removeSession,
@@ -219,9 +227,9 @@ export function AgentPanel({ repoPath, cwd, isActive = false, onSwitchWorktree }
   ]);
 
   const handleNewSession = useCallback(() => {
-    const newSession = createSession(repoPath, cwd, defaultAgentId, customAgents);
+    const newSession = createSession(repoPath, cwd, defaultAgentId, customAgents, agentSettings);
     addSession(newSession);
-  }, [repoPath, cwd, defaultAgentId, customAgents, addSession]);
+  }, [repoPath, cwd, defaultAgentId, customAgents, agentSettings, addSession]);
 
   const handleCloseSession = useCallback(
     (id: string) => {
@@ -253,13 +261,23 @@ export function AgentPanel({ repoPath, cwd, isActive = false, onSwitchWorktree }
             sessionRepoPath,
             worktreeCwd,
             defaultAgentId,
-            customAgents
+            customAgents,
+            agentSettings
           );
           addSession(newSession);
         }
       }
     },
-    [allSessions, activeIds, defaultAgentId, customAgents, removeSession, setActiveId, addSession]
+    [
+      allSessions,
+      activeIds,
+      defaultAgentId,
+      customAgents,
+      agentSettings,
+      removeSession,
+      setActiveId,
+      addSession,
+    ]
   );
 
   const handleSelectSession = useCallback(
@@ -351,37 +369,31 @@ export function AgentPanel({ repoPath, cwd, isActive = false, onSwitchWorktree }
 
   const handleNewSessionWithAgent = useCallback(
     (agentId: string, agentCommand: string) => {
-      // Handle WSL, Hapi and Happy agent IDs
-      const isWsl = agentId.endsWith('-wsl');
+      // Handle Hapi and Happy agent IDs
       const isHapi = agentId.endsWith('-hapi');
       const isHappy = agentId.endsWith('-happy');
-      const baseId = isWsl
-        ? agentId.slice(0, -4)
-        : isHapi
-          ? agentId.slice(0, -5)
-          : isHappy
-            ? agentId.slice(0, -6)
-            : agentId;
+      const baseId = isHapi ? agentId.slice(0, -5) : isHappy ? agentId.slice(0, -6) : agentId;
 
       // Get agent name for display
       const customAgent = customAgents.find((a) => a.id === baseId);
       const baseName = customAgent?.name ?? AGENT_INFO[baseId]?.name ?? 'Agent';
-      const name = isWsl
-        ? `${baseName} (WSL)`
-        : isHapi
-          ? `${baseName} (Hapi)`
-          : isHappy
-            ? `${baseName} (Happy)`
-            : baseName;
+      const name = isHapi ? `${baseName} (Hapi)` : isHappy ? `${baseName} (Happy)` : baseName;
 
       // Determine environment
-      const environment = isWsl ? 'wsl' : isHapi ? 'hapi' : isHappy ? 'happy' : 'native';
+      const environment = isHapi ? 'hapi' : isHappy ? 'happy' : 'native';
+
+      // Get custom path and args from settings (for builtin agents)
+      const agentConfig = agentSettings[baseId];
+      const customPath = agentConfig?.customPath;
+      const customArgs = agentConfig?.customArgs;
 
       const newSession: Session = {
         id: crypto.randomUUID(),
         name,
         agentId,
         agentCommand,
+        customPath,
+        customArgs,
         initialized: false,
         repoPath,
         cwd,
@@ -390,7 +402,7 @@ export function AgentPanel({ repoPath, cwd, isActive = false, onSwitchWorktree }
 
       addSession(newSession);
     },
-    [repoPath, cwd, customAgents, addSession]
+    [repoPath, cwd, customAgents, agentSettings, addSession]
   );
 
   // Agent session keyboard shortcuts
@@ -473,6 +485,8 @@ export function AgentPanel({ repoPath, cwd, isActive = false, onSwitchWorktree }
               cwd={session.cwd}
               sessionId={session.id}
               agentCommand={session.agentCommand || 'claude'}
+              customPath={session.customPath}
+              customArgs={session.customArgs}
               environment={session.environment || 'native'}
               initialized={session.initialized}
               activated={session.activated}
