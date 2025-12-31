@@ -1,3 +1,5 @@
+import { pathsEqual } from '@/App/storage';
+
 export interface TerminalTab {
   id: string;
   name: string;
@@ -12,23 +14,8 @@ export interface TerminalGroup {
   activeTabId: string | null;
 }
 
-export interface TerminalPanelState {
-  groups: TerminalGroup[];
-  activeGroupId: string;
-  // Per-worktree tracking: which group is active for each worktree
-  activeGroupIds: Record<string, string>;
-}
-
-export function createInitialGroup(): TerminalGroup {
-  return {
-    id: crypto.randomUUID(),
-    tabs: [],
-    activeTabId: null,
-  };
-}
-
 export function getNextTabName(tabs: TerminalTab[], forCwd: string): string {
-  const cwdTabs = tabs.filter((t) => t.cwd === forCwd);
+  const cwdTabs = tabs.filter((t) => pathsEqual(t.cwd, forCwd));
   const numbers = cwdTabs
     .map((t) => {
       const match = t.name.match(/^Untitled-(\d+)$/);

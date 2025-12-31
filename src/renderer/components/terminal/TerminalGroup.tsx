@@ -184,13 +184,8 @@ export function TerminalGroup({
   const hasNoTabs = tabs.length === 0;
 
   return (
-    <div
-      className="relative flex h-full w-full flex-col"
-      onClick={onGroupClick}
-      onKeyDown={(e) => e.key === 'Enter' && onGroupClick()}
-      role="region"
-      tabIndex={-1}
-    >
+    // biome-ignore lint/a11y/useKeyWithClickEvents: click is supplementary, terminals inside handle focus
+    <div className="relative flex h-full w-full flex-col" onClick={onGroupClick}>
       {/* Inactive overlay */}
       {!isGroupActive && (
         <div className="absolute inset-0 z-10 bg-background/10 pointer-events-none" />
