@@ -113,7 +113,7 @@ export class AppDetector {
       Fleet: { id: 'com.jetbrains.fleet', category: AppCategory.Editor },
     };
 
-    // Query registry for installed apps
+    // Query registry with /s to get all subkeys in one call (much faster)
     const registryPaths = [
       'HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
       'HKLM\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall',
@@ -122,93 +122,74 @@ export class AppDetector {
 
     for (const regPath of registryPaths) {
       try {
-        // Get all subkeys
-        const { stdout: keysOutput } = await execAsync(`reg query "${regPath}"`, {
-          timeout: 5000,
+        // Use /s for recursive query - gets all data in one call
+        const { stdout } = await execAsync(`reg query "${regPath}" /s`, {
+          timeout: 10000,
           encoding: 'utf8',
+          maxBuffer: 10 * 1024 * 1024, // 10MB buffer for large output
         });
 
-        const subkeys = keysOutput
-          .split('\n')
-          .map((line) => line.trim())
-          .filter((line) => line.startsWith(regPath));
+        // Parse the output - entries are separated by blank lines
+        const entries = stdout.split(/\r?\n\r?\n/);
 
-        for (const subkey of subkeys) {
-          try {
-            const { stdout: valuesOutput } = await execAsync(`reg query "${subkey}"`, {
-              timeout: 3000,
-              encoding: 'utf8',
-            });
+        for (const entry of entries) {
+          // Parse DisplayName and InstallLocation/DisplayIcon from entry
+          const displayNameMatch = entry.match(/DisplayName\s+REG_SZ\s+(.+)/);
+          if (!displayNameMatch) continue;
 
-            // Parse DisplayName and InstallLocation/DisplayIcon
-            const displayNameMatch = valuesOutput.match(/DisplayName\s+REG_SZ\s+(.+)/);
-            const installLocationMatch = valuesOutput.match(/InstallLocation\s+REG_SZ\s+(.+)/);
-            const displayIconMatch = valuesOutput.match(/DisplayIcon\s+REG_SZ\s+(.+)/);
+          const displayName = displayNameMatch[1].trim();
 
-            if (!displayNameMatch) continue;
-            const displayName = displayNameMatch[1].trim();
+          // Check if it's a JetBrains product
+          for (const [productName, productInfo] of Object.entries(jetbrainsProducts)) {
+            if (displayName.includes(productName)) {
+              const installLocationMatch = entry.match(/InstallLocation\s+REG_SZ\s+(.+)/);
+              const displayIconMatch = entry.match(/DisplayIcon\s+REG_SZ\s+(.+)/);
 
-            // Check if it's a JetBrains product
-            for (const [productName, productInfo] of Object.entries(jetbrainsProducts)) {
-              if (displayName.includes(productName)) {
-                // Get executable path
-                let exePath = '';
-                if (installLocationMatch) {
-                  const installLocation = installLocationMatch[1].trim();
-                  // JetBrains IDEs have exe in bin folder
-                  const possibleExe = join(
-                    installLocation,
-                    'bin',
-                    `${productName.toLowerCase().replace(/\s+/g, '')}64.exe`
-                  );
-                  if (existsSync(possibleExe)) {
-                    exePath = possibleExe;
-                  } else {
-                    // Try common exe names
-                    const exeNames = [
-                      'idea64.exe',
-                      'webstorm64.exe',
-                      'pycharm64.exe',
-                      'goland64.exe',
-                      'clion64.exe',
-                      'rustrover64.exe',
-                      'rider64.exe',
-                      'phpstorm64.exe',
-                      'datagrip64.exe',
-                      'studio64.exe',
-                      'fleet.exe',
-                    ];
-                    for (const exeName of exeNames) {
-                      const testPath = join(installLocation, 'bin', exeName);
-                      if (existsSync(testPath)) {
-                        exePath = testPath;
-                        break;
-                      }
-                    }
-                  }
+              let exePath = '';
+
+              // Try DisplayIcon first (most reliable for JetBrains)
+              if (displayIconMatch) {
+                const iconPath = displayIconMatch[1].trim().split(',')[0].replace(/"/g, '');
+                if (iconPath.endsWith('.exe') && existsSync(iconPath)) {
+                  exePath = iconPath;
                 }
-
-                if (!exePath && displayIconMatch) {
-                  // Try to extract exe path from DisplayIcon
-                  const iconPath = displayIconMatch[1].trim().split(',')[0].replace(/"/g, '');
-                  if (existsSync(iconPath) && iconPath.endsWith('.exe')) {
-                    exePath = iconPath;
-                  }
-                }
-
-                if (exePath) {
-                  detected.push({
-                    name: productName,
-                    bundleId: productInfo.id,
-                    category: productInfo.category,
-                    path: exePath,
-                  });
-                }
-                break;
               }
+
+              // Fallback to InstallLocation
+              if (!exePath && installLocationMatch) {
+                const installLocation = installLocationMatch[1].trim();
+                const exeNames = [
+                  'idea64.exe',
+                  'webstorm64.exe',
+                  'pycharm64.exe',
+                  'goland64.exe',
+                  'clion64.exe',
+                  'rustrover64.exe',
+                  'rider64.exe',
+                  'phpstorm64.exe',
+                  'datagrip64.exe',
+                  'studio64.exe',
+                  'fleet.exe',
+                ];
+                for (const exeName of exeNames) {
+                  const testPath = join(installLocation, 'bin', exeName);
+                  if (existsSync(testPath)) {
+                    exePath = testPath;
+                    break;
+                  }
+                }
+              }
+
+              if (exePath) {
+                detected.push({
+                  name: productName,
+                  bundleId: productInfo.id,
+                  category: productInfo.category,
+                  path: exePath,
+                });
+              }
+              break;
             }
-          } catch {
-            // Skip this subkey
           }
         }
       } catch {
