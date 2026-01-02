@@ -206,14 +206,14 @@ export function ActionPanel({
   });
 
   const activeProvider = React.useMemo(() => {
-    if (!claudeData?.settings?.env) return null;
-    const { env } = claudeData.settings;
+    const env = claudeData?.settings?.env;
+    if (!env) return null;
     return (
       providers.find(
         (p) => p.baseUrl === env.ANTHROPIC_BASE_URL && p.authToken === env.ANTHROPIC_AUTH_TOKEN
       ) ?? null
     );
-  }, [providers, claudeData?.settings?.env]);
+  }, [providers, claudeData?.settings]);
 
   const applyProvider = useMutation({
     mutationFn: (provider: ClaudeProvider) => window.electronAPI.claudeProvider.apply(provider),
@@ -296,8 +296,8 @@ export function ActionPanel({
             },
           },
         ],
-      },
-    ];
+      }
+    );
 
     // Add "Switch Repository" group
     if (repositories.length > 1 && onSwitchRepo) {

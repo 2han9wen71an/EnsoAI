@@ -220,9 +220,7 @@ export function ProviderDialog({
         </div>
 
         <DialogFooter>
-          <DialogClose asChild>
-            <Button variant="outline">{t('Cancel')}</Button>
-          </DialogClose>
+          <DialogClose render={<Button variant="outline">{t('Cancel')}</Button>} />
           <Button onClick={handleSave} disabled={!isValid}>
             {isEditing ? t('Save') : t('Add')}
           </Button>
