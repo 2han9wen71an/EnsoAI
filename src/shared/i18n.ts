@@ -732,6 +732,23 @@ export const zhTranslations: Record<string, string> = {
   'Git worktree save location settings': 'Git Worktree 保存位置设置',
   'Default directory for new worktrees. Leave empty to use ~/ensoai/workspaces':
     '新建 Worktree 的默认目录，留空则使用 ~/ensoai/workspaces',
+  // Claude Provider
+  'Add Provider': '添加 Provider',
+  'Edit Provider': '编辑 Provider',
+  'Current config not saved': '当前配置未保存',
+  'No providers configured': '暂无配置',
+  'Configure Claude API provider settings': '配置 Claude API Provider 设置',
+  Name: '名称',
+  'e.g., Official API': '例如：官方 API',
+  'Base URL': 'Base URL',
+  'Auth Token': 'Auth Token',
+  'Advanced Options': '高级选项',
+  Model: '模型',
+  'Small/Fast Model': 'Small/Fast 模型',
+  'Sonnet Model': 'Sonnet 模型',
+  'Opus Model': 'Opus 模型',
+  'Haiku Model': 'Haiku 模型',
+  Add: '添加',
 };
 
 export function normalizeLocale(input?: string): Locale {
