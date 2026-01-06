@@ -648,11 +648,12 @@ export function TerminalPanel({ cwd, isActive = false }: TerminalPanelProps) {
   ]);
 
   // Auto-create first terminal when panel becomes active and empty (if enabled in settings)
+  // Skip if there's a pending init script - let that create the terminal instead
   useEffect(() => {
-    if (autoCreateSessionOnActivate && isActive && cwd && groups.length === 0) {
+    if (autoCreateSessionOnActivate && isActive && cwd && groups.length === 0 && !pendingScript) {
       handleNewTerminal();
     }
-  }, [autoCreateSessionOnActivate, isActive, cwd, groups.length, handleNewTerminal]);
+  }, [autoCreateSessionOnActivate, isActive, cwd, groups.length, handleNewTerminal, pendingScript]);
 
   useEffect(() => {
     console.log('[TerminalPanel] pendingScript effect:', {
