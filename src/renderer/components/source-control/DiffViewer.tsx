@@ -595,11 +595,11 @@ export function DiffViewer({
       <div className="flex-1">
         {diff && diff.original != null && diff.modified != null && isThemeReady && (
           <DiffEditor
-            key={`${file.path}-${file.staged}-${isThemeReady}`}
+            key={`${rootPath}-${file.path}-${file.staged}-${isThemeReady}`}
             original={diff.original}
             modified={diff.modified}
-            originalModelPath={`inmemory://original/${file.path}`}
-            modifiedModelPath={`inmemory://modified/${file.path}`}
+            originalModelPath={`inmemory://original/${rootPath}/${file.path}`}
+            modifiedModelPath={`inmemory://modified/${rootPath}/${file.path}`}
             language={getLanguageFromPath(file.path)}
             theme={CUSTOM_THEME_NAME}
             onMount={handleEditorMount}
