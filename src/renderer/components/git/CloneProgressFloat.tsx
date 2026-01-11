@@ -1,10 +1,21 @@
-import { AlertCircle, Check, ChevronDown, ChevronUp, Download, X } from 'lucide-react';
+import {
+  AlertCircle,
+  Check,
+  ChevronDown,
+  ChevronUp,
+  Download,
+  MoreHorizontal,
+  X,
+} from 'lucide-react';
 import { useMemo, useState } from 'react';
 import { Button } from '@/components/ui/button';
 import { Progress } from '@/components/ui/progress';
 import { useI18n } from '@/i18n';
 import { cn } from '@/lib/utils';
 import { type CloneTask, useCloneTasksStore } from '@/stores/cloneTasks';
+
+// Maximum number of tasks to display in expanded view
+const MAX_VISIBLE_TASKS = 3;
 
 interface CloneProgressFloatProps {
   onCloneComplete?: (path: string, groupId: string | null) => void;
@@ -23,6 +34,22 @@ export function CloneProgressFloat({ onCloneComplete }: CloneProgressFloatProps)
     [tasks]
   );
   const errorTasks = useMemo(() => tasks.filter((task) => task.status === 'error'), [tasks]);
+
+  // Limit displayed tasks
+  const visibleActiveTasks = activeTasks.slice(0, MAX_VISIBLE_TASKS);
+  const visibleCompletedTasks = completedTasks.slice(
+    0,
+    MAX_VISIBLE_TASKS - visibleActiveTasks.length
+  );
+  const visibleErrorTasks = errorTasks.slice(
+    0,
+    MAX_VISIBLE_TASKS - visibleActiveTasks.length - visibleCompletedTasks.length
+  );
+  const hiddenCount =
+    tasks.length -
+    visibleActiveTasks.length -
+    visibleCompletedTasks.length -
+    visibleErrorTasks.length;
 
   const stageLabels = useMemo<Record<string, string>>(
     () => ({
@@ -114,7 +141,7 @@ export function CloneProgressFloat({ onCloneComplete }: CloneProgressFloatProps)
   return (
     <div className="fixed bottom-4 right-4 z-50 flex flex-col gap-2 max-w-sm">
       {/* Active tasks */}
-      {activeTasks.map((task) => (
+      {visibleActiveTasks.map((task) => (
         <div
           key={task.id}
           role="button"
@@ -139,7 +166,7 @@ export function CloneProgressFloat({ onCloneComplete }: CloneProgressFloatProps)
       ))}
 
       {/* Completed tasks */}
-      {completedTasks.map((task) => (
+      {visibleCompletedTasks.map((task) => (
         <div
           key={task.id}
           className="rounded-lg border border-green-500/30 bg-card shadow-lg p-3 animate-in slide-in-from-bottom-2"
@@ -168,7 +195,7 @@ export function CloneProgressFloat({ onCloneComplete }: CloneProgressFloatProps)
       ))}
 
       {/* Error tasks */}
-      {errorTasks.map((task) => (
+      {visibleErrorTasks.map((task) => (
         <div
           key={task.id}
           className="rounded-lg border border-destructive/50 bg-card shadow-lg p-3 animate-in slide-in-from-bottom-2"
@@ -190,6 +217,18 @@ export function CloneProgressFloat({ onCloneComplete }: CloneProgressFloatProps)
           </p>
         </div>
       ))}
+
+      {/* Hidden tasks indicator */}
+      {hiddenCount > 0 && (
+        <div className="rounded-lg border bg-card/80 shadow-lg p-2 animate-in slide-in-from-bottom-2">
+          <div className="flex items-center justify-center gap-2 text-xs text-muted-foreground">
+            <MoreHorizontal className="h-3 w-3" />
+            <span>
+              {t('and')} {hiddenCount} {t('more')}...
+            </span>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
