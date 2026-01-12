@@ -106,12 +106,21 @@ export const useCloneTasksStore = create<CloneTasksState>()((set, get) => ({
 
 // Global progress listener - call this once at app startup
 let progressListenerInitialized = false;
+let progressListenerCleanup: (() => void) | null = null;
 
-export function initCloneProgressListener() {
-  if (progressListenerInitialized) return;
+export function initCloneProgressListener(): () => void {
+  if (progressListenerInitialized) {
+    return () => {};
+  }
   progressListenerInitialized = true;
 
-  window.electronAPI.git.onCloneProgress((progress) => {
+  progressListenerCleanup = window.electronAPI.git.onCloneProgress((progress) => {
     useCloneTasksStore.getState().updateActiveProgress(progress);
   });
+
+  return () => {
+    progressListenerCleanup?.();
+    progressListenerCleanup = null;
+    progressListenerInitialized = false;
+  };
 }

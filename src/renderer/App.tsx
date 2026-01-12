@@ -75,9 +75,6 @@ import { useNavigationStore } from './stores/navigation';
 import { useSettingsStore } from './stores/settings';
 import { useWorktreeStore } from './stores/worktree';
 
-// Initialize global clone progress listener
-initCloneProgressListener();
-
 export default function App() {
   const { t } = useI18n();
   // Per-worktree tab state: { [worktreePath]: TabId }
@@ -309,6 +306,12 @@ export default function App() {
       // Wait for worktrees to load before setting active worktree.
       setActiveWorktree({ path: savedWorktreePath } as GitWorktree);
     }
+  }, []);
+
+  // Initialize clone progress listener with cleanup for HMR
+  useEffect(() => {
+    const cleanup = initCloneProgressListener();
+    return cleanup;
   }, []);
 
   const saveRepositories = useCallback((repos: Repository[]) => {

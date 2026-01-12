@@ -96,6 +96,10 @@ export function AddRepositoryDialog({
   const [isValidUrl, setIsValidUrl] = React.useState(false);
 
   // Clone progress state
+  // Note: isCloning and cloneProgress are local UI state for this dialog.
+  // When minimized, these are reset but the clone continues in background
+  // managed by cloneTasksStore. cloneTaskId links to the store task for
+  // progress sync while dialog is open.
   const [isCloning, setIsCloning] = React.useState(false);
   const [cloneProgress, setCloneProgress] = React.useState<CloneProgress | null>(null);
   const [cloneTaskId, setCloneTaskId] = React.useState<string | null>(null);
