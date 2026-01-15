@@ -18,9 +18,22 @@ import type {
 import iconv from 'iconv-lite';
 import jschardet from 'jschardet';
 import simpleGit, { type SimpleGit } from 'simple-git';
+import { getProxyEnvVars } from '../proxy/ProxyConfig';
+import { getEnhancedPath } from '../terminal/PtyManager';
 import { gitShow } from './encoding';
 
 const execAsync = promisify(exec);
+
+/**
+ * Create a simpleGit instance with enhanced PATH for git-lfs and other tools
+ */
+function createGit(workdir: string): SimpleGit {
+  return simpleGit(workdir).env({
+    ...process.env,
+    ...getProxyEnvVars(),
+    PATH: getEnhancedPath(),
+  });
+}
 
 /**
  * Kill processes that have their working directory under the specified path (Windows only)
@@ -49,7 +62,7 @@ export class WorktreeService {
   private git: SimpleGit;
 
   constructor(workdir: string) {
-    this.git = simpleGit(workdir);
+    this.git = createGit(workdir);
   }
 
   /**
@@ -262,13 +275,13 @@ export class WorktreeService {
    */
   async merge(options: WorktreeMergeOptions): Promise<WorktreeMergeResult> {
     const mainWorktreePath = await this.getMainWorktreePath();
-    const mainGit = simpleGit(mainWorktreePath);
+    const mainGit = createGit(mainWorktreePath);
 
     // Get the source branch from the worktree
     const sourceBranch = await this.getWorktreeBranch(options.worktreePath);
 
     // Check if worktree has uncommitted changes
-    const worktreeGit = simpleGit(options.worktreePath);
+    const worktreeGit = createGit(options.worktreePath);
     const worktreeStatus = await worktreeGit.status();
     if (!worktreeStatus.isClean()) {
       return {
@@ -415,7 +428,7 @@ export class WorktreeService {
    * Get the current merge state
    */
   async getMergeState(workdir: string): Promise<MergeState> {
-    const git = simpleGit(workdir);
+    const git = createGit(workdir);
 
     // Check if we're in a merge state by looking for MERGE_HEAD
     try {
@@ -457,7 +470,7 @@ export class WorktreeService {
    * Get list of conflicted files
    */
   async getConflicts(workdir: string): Promise<MergeConflict[]> {
-    const git = simpleGit(workdir);
+    const git = createGit(workdir);
     const status = await git.status();
 
     return status.conflicted.map((file) => ({
@@ -491,7 +504,7 @@ export class WorktreeService {
     const buffer = iconv.encode(resolution.content, encoding);
     await writeFile(filePath, buffer);
 
-    const git = simpleGit(workdir);
+    const git = createGit(workdir);
     await git.add(resolution.file);
   }
 
@@ -499,7 +512,7 @@ export class WorktreeService {
    * Abort the current merge/rebase
    */
   async abortMerge(workdir: string): Promise<void> {
-    const git = simpleGit(workdir);
+    const git = createGit(workdir);
     const { existsSync } = await import('node:fs');
     const { join } = await import('node:path');
 
@@ -537,7 +550,7 @@ export class WorktreeService {
     message?: string,
     cleanupOptions?: WorktreeMergeCleanupOptions
   ): Promise<WorktreeMergeResult> {
-    const git = simpleGit(workdir);
+    const git = createGit(workdir);
 
     // Check if there are still unresolved conflicts
     const conflicts = await this.getConflicts(workdir);
@@ -563,7 +576,7 @@ export class WorktreeService {
         // If current workdir is the worktree being deleted, use main worktree's git instead
         const cleanupGit =
           workdir === cleanupOptions.worktreePath
-            ? simpleGit(await this.getMainWorktreePath())
+            ? createGit(await this.getMainWorktreePath())
             : git;
         warnings = await this.deleteWorktreeSafely(cleanupGit, cleanupOptions.worktreePath, {
           deleteBranch: cleanupOptions.deleteBranchAfterMerge,
