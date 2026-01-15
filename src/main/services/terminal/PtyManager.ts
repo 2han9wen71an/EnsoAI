@@ -229,11 +229,20 @@ export function getEnhancedPath(): string {
     cachedNvmNodePaths = [];
     const nvmVersionsDir = join(home, '.nvm', 'versions', 'node');
 
-    // Always add 'current' symlink first (highest priority)
+    // Add 'current' symlink first if it exists (highest priority)
+    // Note: Official nvm uses ~/.nvm/alias for version aliases, but some setups
+    // or custom configurations may create a 'current' symlink here
     const currentLink = join(nvmVersionsDir, 'current', 'bin');
     if (existsSync(currentLink)) {
       cachedNvmNodePaths.push(currentLink);
     }
+
+    // Parse semver version string, supporting incomplete versions like 'v20' or 'v20.10'
+    const parseVersion = (v: string): [number, number, number] => {
+      const match = v.match(/^v(\d+)(?:\.(\d+))?(?:\.(\d+))?/);
+      if (!match) return [0, 0, 0];
+      return [parseInt(match[1]) || 0, parseInt(match[2]) || 0, parseInt(match[3]) || 0];
+    };
 
     // Add versioned paths, sorted by semver descending (newer versions first)
     if (existsSync(nvmVersionsDir)) {
@@ -241,12 +250,6 @@ export function getEnhancedPath(): string {
         const versions = readdirSync(nvmVersionsDir)
           .filter((v) => v.startsWith('v'))
           .sort((a, b) => {
-            // Parse version numbers for proper semver comparison
-            const parseVersion = (v: string) => {
-              const match = v.match(/^v(\d+)\.(\d+)\.(\d+)/);
-              if (!match) return [0, 0, 0];
-              return [parseInt(match[1]), parseInt(match[2]), parseInt(match[3])];
-            };
             const [aMajor, aMinor, aPatch] = parseVersion(a);
             const [bMajor, bMinor, bPatch] = parseVersion(b);
             // Sort descending (newer versions first)
