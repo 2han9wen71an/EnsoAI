@@ -45,6 +45,13 @@ files:
   - "!node_modules/shiki/dist/themes/**"
   - "!node_modules/@shikijs/langs/**"
   - "!node_modules/@shikijs/themes/**"
+  # Exclude AI SDK bundled CLI binaries (we use system-installed CLIs via custom spawn)
+  # @openai/codex vendor: ~326MB of pre-built binaries for all platforms
+  - "!node_modules/@openai/codex/vendor/**"
+  # @anthropic-ai/claude-agent-sdk: ~68MB of CLI and WASM files
+  - "!node_modules/@anthropic-ai/claude-agent-sdk/vendor/**"
+  - "!node_modules/@anthropic-ai/claude-agent-sdk/cli.js"
+  - "!node_modules/@anthropic-ai/claude-agent-sdk/*.wasm"
 
 asar: true
 asarUnpack:
