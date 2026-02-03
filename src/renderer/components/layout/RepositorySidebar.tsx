@@ -1,13 +1,5 @@
 import { LayoutGroup, motion } from 'framer-motion';
-import {
-  FolderGit2,
-  FolderMinus,
-  PanelLeftClose,
-  Plus,
-  Search,
-  Settings,
-  Settings2,
-} from 'lucide-react';
+import { FolderGit2, FolderMinus, PanelLeftClose, Plus, Search, Settings2 } from 'lucide-react';
 import { useCallback, useMemo, useRef, useState } from 'react';
 import { ALL_GROUP_ID, type RepositoryGroup, type TabId } from '@/App/constants';
 import {
@@ -39,6 +31,7 @@ import { useI18n } from '@/i18n';
 import { hexToRgba } from '@/lib/colors';
 import { springFast } from '@/lib/motion';
 import { cn } from '@/lib/utils';
+import { useSettingsStore } from '@/stores/settings';
 import { RunningProjectsPopover } from './RunningProjectsPopover';
 
 interface Repository {
@@ -55,6 +48,8 @@ interface RepositorySidebarProps {
   onRemoveRepository?: (repoPath: string) => void;
   onReorderRepositories?: (fromIndex: number, toIndex: number) => void;
   onOpenSettings?: () => void;
+  isSettingsActive?: boolean;
+  onToggleSettings?: () => void;
   collapsed?: boolean;
   onCollapse?: () => void;
   groups: RepositoryGroup[];
@@ -66,6 +61,8 @@ interface RepositorySidebarProps {
   onMoveToGroup?: (repoPath: string, groupId: string | null) => void;
   onSwitchTab?: (tab: TabId) => void;
   onSwitchWorktreeByPath?: (path: string) => Promise<void> | void;
+  /** Whether a file is being dragged over the sidebar (from App.tsx global handler) */
+  isFileDragOver?: boolean;
 }
 
 export function RepositorySidebar({
@@ -75,7 +72,9 @@ export function RepositorySidebar({
   onAddRepository,
   onRemoveRepository,
   onReorderRepositories,
-  onOpenSettings,
+  onOpenSettings: _onOpenSettings,
+  isSettingsActive: _isSettingsActive,
+  onToggleSettings: _onToggleSettings,
   collapsed: _collapsed = false,
   onCollapse,
   groups,
@@ -87,8 +86,10 @@ export function RepositorySidebar({
   onMoveToGroup,
   onSwitchTab,
   onSwitchWorktreeByPath,
+  isFileDragOver,
 }: RepositorySidebarProps) {
   const { t, tNode } = useI18n();
+  const _settingsDisplayMode = useSettingsStore((s) => s.settingsDisplayMode);
   const [searchQuery, setSearchQuery] = useState('');
   const [menuOpen, setMenuOpen] = useState(false);
   const [menuPosition, setMenuPosition] = useState({ x: 0, y: 0 });
@@ -208,7 +209,12 @@ export function RepositorySidebar({
   }, [repositories, activeGroupId, searchQuery]);
 
   return (
-    <aside className="flex h-full w-full flex-col border-r bg-background">
+    <aside
+      className={cn(
+        'flex h-full w-full flex-col border-r bg-background transition-colors',
+        isFileDragOver && 'bg-primary/10'
+      )}
+    >
       {/* Header */}
       <div className="flex h-12 items-center justify-end gap-1 border-b px-3 drag-region">
         {onSwitchWorktreeByPath && (
@@ -277,7 +283,14 @@ export function RepositorySidebar({
                 {t('Add a Git repository from a local folder to get started')}
               </EmptyDescription>
             </EmptyHeader>
-            <Button onClick={onAddRepository} variant="outline" className="mt-2">
+            <Button
+              onClick={(e) => {
+                e.currentTarget.blur();
+                onAddRepository();
+              }}
+              variant="outline"
+              className="mt-2"
+            >
               <Plus className="mr-2 h-4 w-4" />
               {t('Add Repository')}
             </Button>
@@ -323,7 +336,7 @@ export function RepositorySidebar({
                           transition={springFast}
                         />
                       )}
-                      {/* Repo name */}
+                      {/* Repo name + Tag + Settings */}
                       <div className="relative z-10 flex w-full items-center gap-2">
                         <FolderGit2
                           className={cn(
@@ -332,25 +345,11 @@ export function RepositorySidebar({
                           )}
                         />
                         <span className="truncate font-medium flex-1">{repo.name}</span>
-                        <button
-                          type="button"
-                          className="shrink-0 p-1 rounded hover:bg-muted"
-                          onClick={(e) => {
-                            e.stopPropagation();
-                            setRepoSettingsTarget(repo);
-                            setRepoSettingsOpen(true);
-                          }}
-                          title={t('Repository Settings')}
-                        >
-                          <Settings2 className="h-3.5 w-3.5 text-muted-foreground" />
-                        </button>
-                      </div>
 
-                      {/* Tags (Group) */}
-                      {group && (
-                        <div className="relative z-10 flex w-full items-center gap-1 pl-6">
+                        {/* Group Tag - 移到这里 */}
+                        {group && (
                           <span
-                            className="inline-flex h-5 max-w-full items-center gap-1 rounded-md border px-1.5 text-[10px] text-foreground/80"
+                            className="shrink-0 inline-flex h-5 items-center gap-1 rounded-md border px-1.5 text-[10px] text-foreground/80"
                             style={{
                               backgroundColor: tagBg ?? undefined,
                               borderColor: tagBorder ?? undefined,
@@ -360,10 +359,33 @@ export function RepositorySidebar({
                             {group.emoji && (
                               <span className="text-[0.9em] opacity-90">{group.emoji}</span>
                             )}
-                            <span className="truncate">{group.name}</span>
+                            <span className="truncate max-w-[60px]">{group.name}</span>
                           </span>
+                        )}
+
+                        {/* Repository Settings */}
+                        <div
+                          role="button"
+                          tabIndex={0}
+                          className="shrink-0 p-1 rounded hover:bg-muted cursor-pointer"
+                          onClick={(e) => {
+                            e.stopPropagation();
+                            setRepoSettingsTarget(repo);
+                            setRepoSettingsOpen(true);
+                          }}
+                          onKeyDown={(e) => {
+                            if (e.key === 'Enter' || e.key === ' ') {
+                              e.preventDefault();
+                              e.stopPropagation();
+                              setRepoSettingsTarget(repo);
+                              setRepoSettingsOpen(true);
+                            }
+                          }}
+                          title={t('Repository Settings')}
+                        >
+                          <Settings2 className="h-3.5 w-3.5 text-muted-foreground" />
                         </div>
-                      )}
+                      </div>
                       {/* Path */}
                       <div
                         className={cn(
@@ -395,17 +417,13 @@ export function RepositorySidebar({
           <button
             type="button"
             className="flex h-8 flex-1 items-center justify-start gap-2 rounded-md px-3 text-sm text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
-            onClick={onAddRepository}
+            onClick={(e) => {
+              e.currentTarget.blur();
+              onAddRepository();
+            }}
           >
             <Plus className="h-4 w-4" />
             {t('Add Repository')}
-          </button>
-          <button
-            type="button"
-            className="flex h-8 w-8 items-center justify-center rounded-md text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
-            onClick={onOpenSettings}
-          >
-            <Settings className="h-4 w-4" />
           </button>
         </div>
       </div>

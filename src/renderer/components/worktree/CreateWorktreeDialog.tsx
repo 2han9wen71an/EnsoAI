@@ -34,6 +34,7 @@ import { Field, FieldDescription, FieldLabel } from '@/components/ui/field';
 import { Input } from '@/components/ui/input';
 import { Tabs, TabsContent, TabsList, TabsTrigger } from '@/components/ui/tabs';
 import { useI18n } from '@/i18n';
+import { Z_INDEX } from '@/lib/z-index';
 import { useSettingsStore } from '@/stores/settings';
 
 // Get display name for branch (remove remotes/ prefix for remote branches)
@@ -159,21 +160,33 @@ export function CreateWorktreeDialog({
     [branches, t]
   );
 
+  // Track if baseBranch has been initialized to prevent Combobox reset
+  const baseBranchInitializedRef = React.useRef(false);
+
   // Initialize baseBranch state when dialog opens
   React.useEffect(() => {
-    if (open && currentBranch && !baseBranch) {
+    if (open && currentBranch && !baseBranchInitializedRef.current) {
       const branchName = currentBranch.name;
       setBaseBranch(branchName);
       setBaseBranchQuery(getBranchLabel(branchName));
+      baseBranchInitializedRef.current = true;
     }
-  }, [open, currentBranch, baseBranch, getBranchLabel]);
+    // Reset initialized flag when dialog closes
+    if (!open) {
+      baseBranchInitializedRef.current = false;
+    }
+  }, [open, currentBranch, getBranchLabel]);
 
   // Keep input value in sync when dropdown is closed
   React.useEffect(() => {
-    if (!baseBranchOpen) {
-      setBaseBranchQuery(getBranchLabel(baseBranch || currentBranch?.name));
+    if (baseBranchOpen) {
+      // Clear search when opening to show all branches
+      setBaseBranchQuery('');
+    } else if (baseBranch) {
+      // Restore branch label when closing
+      setBaseBranchQuery(getBranchLabel(baseBranch));
     }
-  }, [baseBranch, currentBranch, baseBranchOpen, getBranchLabel]);
+  }, [baseBranchOpen, baseBranch, getBranchLabel]);
 
   const loadPullRequests = React.useCallback(async () => {
     setPrsLoading(true);
@@ -440,12 +453,27 @@ export function CreateWorktreeDialog({
                     items={branchGroups}
                     value={baseBranch || null}
                     onValueChange={(value: string | null) => {
+                      // Ignore null values from Combobox initialization/reset if already initialized
+                      if (value === null && baseBranchInitializedRef.current) {
+                        return;
+                      }
                       const nextValue = value || '';
                       setBaseBranch(nextValue);
                       setBaseBranchQuery(getBranchLabel(nextValue));
                     }}
                     inputValue={baseBranchQuery}
-                    onInputValueChange={setBaseBranchQuery}
+                    onInputValueChange={(value) => {
+                      // Allow clearing when dropdown is open (for showing all branches)
+                      if (value === '' && baseBranchOpen) {
+                        setBaseBranchQuery('');
+                        return;
+                      }
+                      // Ignore empty string during initialization if we already have a query
+                      if (value === '' && baseBranchQuery && baseBranchInitializedRef.current) {
+                        return;
+                      }
+                      setBaseBranchQuery(value);
+                    }}
                     open={baseBranchOpen}
                     onOpenChange={setBaseBranchOpen}
                   >
@@ -454,7 +482,7 @@ export function CreateWorktreeDialog({
                       startAddon={<GitBranch className="h-4 w-4" />}
                       showTrigger
                     />
-                    <ComboboxPopup>
+                    <ComboboxPopup zIndex={Z_INDEX.NESTED_MODAL_CONTENT}>
                       <ComboboxEmpty>{t('No branches found')}</ComboboxEmpty>
                       <ComboboxList>
                         {(group: BranchGroup) => (
@@ -565,7 +593,7 @@ export function CreateWorktreeDialog({
                             startAddon={<GitPullRequest className="h-4 w-4" />}
                             showTrigger
                           />
-                          <ComboboxPopup>
+                          <ComboboxPopup zIndex={Z_INDEX.NESTED_MODAL_CONTENT}>
                             <ComboboxEmpty>{t('No pull requests found')}</ComboboxEmpty>
                             <ComboboxList>
                               {(item: PrItem) => (

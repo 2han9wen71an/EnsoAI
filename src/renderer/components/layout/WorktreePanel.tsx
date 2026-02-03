@@ -14,7 +14,7 @@ import {
   Trash2,
   X,
 } from 'lucide-react';
-import { useCallback, useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   AlertDialog,
   AlertDialogClose,
@@ -36,6 +36,7 @@ import { GlowBorder, type GlowState, useGlowEffectEnabled } from '@/components/u
 import { toastManager } from '@/components/ui/toast';
 import { CreateWorktreeDialog } from '@/components/worktree/CreateWorktreeDialog';
 import { useWorktreeOutputState } from '@/hooks/useOutputState';
+import { useShouldPoll } from '@/hooks/useWindowFocus';
 import { useI18n } from '@/i18n';
 import { springFast } from '@/lib/motion';
 import { cn } from '@/lib/utils';
@@ -54,7 +55,7 @@ interface WorktreePanelProps {
   onRemoveWorktree: (
     worktree: GitWorktree,
     options?: { deleteBranch?: boolean; force?: boolean }
-  ) => Promise<void>;
+  ) => void;
   onMergeWorktree?: (worktree: GitWorktree) => void;
   onReorderWorktrees?: (fromIndex: number, toIndex: number) => void;
   onRefresh: () => void;
@@ -92,7 +93,6 @@ export function WorktreePanel({
   const [worktreeToDelete, setWorktreeToDelete] = useState<GitWorktree | null>(null);
   const [deleteBranch, setDeleteBranch] = useState(false);
   const [forceDelete, setForceDelete] = useState(false);
-  const [isDeleting, setIsDeleting] = useState(false);
 
   // Drag reorder
   const draggedIndexRef = useRef<number | null>(null);
@@ -176,11 +176,10 @@ export function WorktreePanel({
 
   const fetchDiffStats = useWorktreeActivityStore((s) => s.fetchDiffStats);
   const activities = useWorktreeActivityStore((s) => s.activities);
+  const shouldPoll = useShouldPoll();
 
-  // Fetch diff stats only for worktrees with active sessions, periodically (every 10 seconds)
   useEffect(() => {
-    if (worktrees.length === 0) return;
-    // Only fetch for worktrees that have active agent or terminal sessions
+    if (worktrees.length === 0 || !shouldPoll) return;
     const activePaths = worktrees
       .filter((wt) => {
         const activity = activities[wt.path];
@@ -190,14 +189,12 @@ export function WorktreePanel({
 
     if (activePaths.length === 0) return;
 
-    // Initial fetch
     fetchDiffStats(activePaths);
-    // Periodic refresh
     const interval = setInterval(() => {
       fetchDiffStats(activePaths);
     }, 10000);
     return () => clearInterval(interval);
-  }, [worktrees, activities, fetchDiffStats]);
+  }, [worktrees, activities, fetchDiffStats, shouldPoll]);
 
   return (
     <aside className="flex h-full w-full flex-col border-r bg-background">
@@ -219,23 +216,6 @@ export function WorktreePanel({
             <FolderOpen className="h-4 w-4" />
           </button>
         )}
-        {/* Create worktree button */}
-        <CreateWorktreeDialog
-          branches={branches}
-          projectName={projectName}
-          workdir={workdir}
-          isLoading={isCreating}
-          onSubmit={onCreateWorktree}
-          trigger={
-            <button
-              type="button"
-              className="flex h-8 w-8 items-center justify-center rounded-md no-drag text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
-              title={t('New Worktree')}
-            >
-              <Plus className="h-4 w-4" />
-            </button>
-          }
-        />
         {/* Refresh button */}
         <button
           type="button"
@@ -342,6 +322,7 @@ export function WorktreePanel({
                 <WorktreeItem
                   key={worktree.path}
                   worktree={worktree}
+                  branches={branches}
                   isActive={activeWorktree?.path === worktree.path}
                   onClick={() => onSelectWorktree(worktree)}
                   onDelete={() => setWorktreeToDelete(worktree)}
@@ -365,6 +346,26 @@ export function WorktreePanel({
             </div>
           </LayoutGroup>
         )}
+      </div>
+
+      {/* Footer - Create Worktree Button */}
+      <div className="shrink-0 border-t p-2">
+        <CreateWorktreeDialog
+          branches={branches}
+          projectName={projectName}
+          workdir={workdir}
+          isLoading={isCreating}
+          onSubmit={onCreateWorktree}
+          trigger={
+            <button
+              type="button"
+              className="flex h-8 w-full items-center justify-start gap-2 rounded-md px-3 text-sm text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+            >
+              <Plus className="h-4 w-4" />
+              {t('New Worktree')}
+            </button>
+          }
+        />
       </div>
 
       {/* Delete confirmation dialog */}
@@ -428,43 +429,19 @@ export function WorktreePanel({
             )}
           </div>
           <AlertDialogFooter>
-            <AlertDialogClose
-              render={
-                <Button variant="outline" disabled={isDeleting}>
-                  {t('Cancel')}
-                </Button>
-              }
-            />
+            <AlertDialogClose render={<Button variant="outline">{t('Cancel')}</Button>} />
             <Button
               variant="destructive"
-              disabled={isDeleting}
-              onClick={async () => {
+              onClick={() => {
                 if (worktreeToDelete) {
-                  setIsDeleting(true);
-                  try {
-                    await onRemoveWorktree(worktreeToDelete, { deleteBranch, force: forceDelete });
-                    setWorktreeToDelete(null);
-                    setDeleteBranch(false);
-                    setForceDelete(false);
-                  } catch (err) {
-                    const message = err instanceof Error ? err.message : String(err);
-                    const hasUncommitted = message.includes('modified or untracked');
-                    toastManager.add({
-                      type: 'error',
-                      title: t('Delete failed'),
-                      description: hasUncommitted
-                        ? t(
-                            'This directory contains uncommitted changes. Please check "Force delete".'
-                          )
-                        : message,
-                    });
-                  } finally {
-                    setIsDeleting(false);
-                  }
+                  onRemoveWorktree(worktreeToDelete, { deleteBranch, force: forceDelete });
+                  setWorktreeToDelete(null);
+                  setDeleteBranch(false);
+                  setForceDelete(false);
                 }
               }}
             >
-              {isDeleting ? t('Deleting...') : t('Delete')}
+              {t('Delete')}
             </Button>
           </AlertDialogFooter>
         </AlertDialogPopup>
@@ -488,6 +465,7 @@ interface WorktreeItemProps {
   onDrop?: (e: React.DragEvent) => void;
   showDropIndicator?: boolean;
   dropDirection?: 'top' | 'bottom' | null;
+  branches?: GitBranchType[];
 }
 
 function WorktreeItem({
@@ -504,6 +482,7 @@ function WorktreeItem({
   onDrop,
   showDropIndicator,
   dropDirection,
+  branches = [],
 }: WorktreeItemProps) {
   const { t } = useI18n();
   const [menuOpen, setMenuOpen] = useState(false);
@@ -514,6 +493,13 @@ function WorktreeItem({
   const branchDisplay = worktree.branch || t('Detached');
   const isPrunable = worktree.prunable;
   const glowEnabled = useGlowEffectEnabled();
+
+  // Check if branch is merged to main
+  const isMerged = useMemo(() => {
+    if (!worktree.branch || isMain) return false;
+    const branch = branches.find((b) => b.name === worktree.branch);
+    return branch?.merged === true;
+  }, [worktree.branch, isMain, branches]);
 
   // Subscribe to activity store
   const activities = useWorktreeActivityStore((s) => s.activities);
@@ -635,6 +621,10 @@ function WorktreeItem({
           ) : isMain ? (
             <span className="shrink-0 rounded bg-emerald-500/20 px-1.5 py-0.5 text-[10px] font-medium uppercase text-emerald-600 dark:text-emerald-400">
               {t('Main')}
+            </span>
+          ) : isMerged ? (
+            <span className="shrink-0 rounded bg-success/20 px-1.5 py-0.5 text-[10px] font-medium uppercase text-success-foreground">
+              {t('Merged')}
             </span>
           ) : null}
         </div>

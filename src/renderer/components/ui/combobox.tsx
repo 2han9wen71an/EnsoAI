@@ -7,13 +7,16 @@ import * as React from 'react';
 import { Input } from '@/components/ui/input';
 import { ScrollArea } from '@/components/ui/scroll-area';
 import { cn } from '@/lib/utils';
+import { Z_INDEX } from '@/lib/z-index';
 
 const ComboboxContext = React.createContext<{
   chipsRef: React.RefObject<Element | null> | null;
   multiple: boolean;
+  rootRef: React.RefObject<HTMLDivElement | null> | null;
 }>({
   chipsRef: null,
   multiple: false,
+  rootRef: null,
 });
 
 type ComboboxRootProps<ItemValue, Multiple extends boolean | undefined> = Parameters<
@@ -24,9 +27,12 @@ function Combobox<ItemValue, Multiple extends boolean | undefined = false>(
   props: ComboboxPrimitive.Root.Props<ItemValue, Multiple>
 ) {
   const chipsRef = React.useRef<Element | null>(null);
+  const rootRef = React.useRef<HTMLDivElement | null>(null);
   return (
-    <ComboboxContext.Provider value={{ chipsRef, multiple: !!props.multiple }}>
-      <ComboboxPrimitive.Root {...(props as ComboboxRootProps<ItemValue, Multiple>)} />
+    <ComboboxContext.Provider value={{ chipsRef, multiple: !!props.multiple, rootRef }}>
+      <div ref={rootRef} className="contents">
+        <ComboboxPrimitive.Root {...(props as ComboboxRootProps<ItemValue, Multiple>)} />
+      </div>
     </ComboboxContext.Provider>
   );
 }
@@ -124,17 +130,44 @@ function ComboboxPopup({
   className,
   children,
   sideOffset = 4,
+  zIndex,
   ...props
 }: ComboboxPrimitive.Popup.Props & {
   sideOffset?: number;
+  zIndex?: number;
 }) {
-  const { chipsRef } = React.useContext(ComboboxContext);
+  const { chipsRef, rootRef } = React.useContext(ComboboxContext);
+
+  // Detect modal context by checking if the combobox root is inside a dialog
+  // NOTE: Not using useMemo because rootRef.current is null on first render
+  // and ref changes don't trigger re-renders. This logic is lightweight (a few
+  // DOM queries) and only runs when the popup renders (i.e. when open).
+  let computedZIndex: number = Z_INDEX.DROPDOWN;
+  if (zIndex !== undefined) {
+    computedZIndex = zIndex;
+  } else {
+    const rootEl = rootRef?.current;
+    if (rootEl) {
+      // Check if inside a nested modal first
+      const nestedModal = rootEl.closest('[data-slot="dialog-popup"] [data-slot="dialog-popup"]');
+      if (nestedModal) {
+        computedZIndex = Z_INDEX.DROPDOWN_IN_NESTED_MODAL;
+      } else {
+        // Check if inside a modal
+        const modal = rootEl.closest('[data-slot="dialog-popup"]');
+        if (modal) {
+          computedZIndex = Z_INDEX.DROPDOWN_IN_MODAL;
+        }
+      }
+    }
+  }
 
   return (
     <ComboboxPrimitive.Portal>
       <ComboboxPrimitive.Positioner
         anchor={chipsRef}
-        className="z-[55] select-none"
+        className="select-none"
+        style={{ zIndex: computedZIndex }}
         data-slot="combobox-positioner"
         sideOffset={sideOffset}
       >
@@ -157,11 +190,18 @@ function ComboboxPopup({
   );
 }
 
-function ComboboxItem({ className, children, ...props }: ComboboxPrimitive.Item.Props) {
+function ComboboxItem({
+  className,
+  children,
+  endAddon,
+  ...props
+}: ComboboxPrimitive.Item.Props & {
+  endAddon?: React.ReactNode;
+}) {
   return (
     <ComboboxPrimitive.Item
       className={cn(
-        "grid min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-default grid-cols-[1rem_1fr] items-center gap-2 rounded-sm py-1 ps-2 pe-4 text-base outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
+        "grid min-h-8 in-data-[side=none]:min-w-[calc(var(--anchor-width)+1.25rem)] cursor-default grid-cols-[1rem_1fr_auto] items-center gap-2 rounded-sm py-1 ps-2 pe-4 text-base outline-none data-disabled:pointer-events-none data-highlighted:bg-accent data-highlighted:text-accent-foreground data-disabled:opacity-64 sm:min-h-7 sm:text-sm [&_svg:not([class*='size-'])]:size-4.5 sm:[&_svg:not([class*='size-'])]:size-4 [&_svg]:pointer-events-none [&_svg]:shrink-0",
         className
       )}
       data-slot="combobox-item"
@@ -178,12 +218,13 @@ function ComboboxItem({ className, children, ...props }: ComboboxPrimitive.Item.
           strokeWidth="2"
           viewBox="0 0 24 24"
           width="24"
-          xmlns="http://www.w3.org/1500/svg"
+          xmlns="http://www.w3.org/2000/svg"
         >
           <path d="M5.252 12.7 10.2 18.63 18.748 5.37" />
         </svg>
       </ComboboxPrimitive.ItemIndicator>
       <div className="col-start-2">{children}</div>
+      {endAddon && <div className="col-start-3 flex items-center">{endAddon}</div>}
     </ComboboxPrimitive.Item>
   );
 }
@@ -347,20 +388,20 @@ function ComboboxChipRemove(props: ComboboxPrimitive.ChipRemove.Props) {
 
 export {
   Combobox,
-  ComboboxInput,
-  ComboboxTrigger,
-  ComboboxPopup,
-  ComboboxItem,
-  ComboboxSeparator,
+  ComboboxChip,
+  ComboboxChips,
+  ComboboxClear,
+  ComboboxCollection,
+  ComboboxEmpty,
   ComboboxGroup,
   ComboboxGroupLabel,
-  ComboboxEmpty,
-  ComboboxValue,
+  ComboboxInput,
+  ComboboxItem,
   ComboboxList,
-  ComboboxClear,
-  ComboboxStatus,
+  ComboboxPopup,
   ComboboxRow,
-  ComboboxCollection,
-  ComboboxChips,
-  ComboboxChip,
+  ComboboxSeparator,
+  ComboboxStatus,
+  ComboboxTrigger,
+  ComboboxValue,
 };

@@ -68,7 +68,7 @@ export function CommentForm({
       </div>
       <textarea
         ref={inputRef}
-        className="w-full h-20 rounded border bg-muted/50 p-2 text-sm resize-none focus:outline-none focus:ring-2 focus:ring-ring"
+        className="w-full h-20 rounded border bg-muted/50 p-2 text-sm text-foreground resize-none focus:outline-none focus:ring-2 focus:ring-ring"
         placeholder={t('Leave a comment...')}
         value={text}
         onChange={(e) => setText(e.target.value)}
@@ -150,8 +150,8 @@ export function useEditorLineComment({
 
       // Send comment to terminal
       const message = text
-        ? `@${displayPath}#L${lineNumber}\nUser comment: "${text}"`
-        : `@${displayPath}#L${lineNumber}`;
+        ? `${displayPath}#L${lineNumber}\nUser comment: "${text}"`
+        : `${displayPath}#L${lineNumber}`;
       write(sessionId, `${message}\r`);
 
       // Close comment form

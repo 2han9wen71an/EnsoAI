@@ -33,6 +33,7 @@ import { toastManager } from '@/components/ui/toast';
 import { useGitPull, useGitPush, useGitStatus } from '@/hooks/useGit';
 import { useCommitDiff, useCommitFiles, useGitHistoryInfinite } from '@/hooks/useGitHistory';
 import { useFileChanges, useGitFetch } from '@/hooks/useSourceControl';
+import { useSubmoduleFileDiff, useSubmodules } from '@/hooks/useSubmodules';
 import { useI18n } from '@/i18n';
 import { heightVariants, springFast } from '@/lib/motion';
 import { cn } from '@/lib/utils';
@@ -43,6 +44,7 @@ import { CommitDiffViewer } from './CommitDiffViewer';
 import { CommitHistoryList } from './CommitHistoryList';
 import { panelTransition } from './constants';
 import { DiffViewer } from './DiffViewer';
+import { SubmoduleSection } from './SubmoduleSection';
 import { usePanelResize } from './usePanelResize';
 import { useSourceControlActions } from './useSourceControlActions';
 
@@ -68,6 +70,16 @@ export function SourceControlPanel({
   const [historyExpanded, setHistoryExpanded] = useState(false);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
 
+  // Submodule expanded state - track which submodules are expanded
+  const [expandedSubmodules, setExpandedSubmodules] = useState<Set<string>>(new Set());
+
+  // Selected submodule file state
+  const [selectedSubmoduleFile, setSelectedSubmoduleFile] = useState<{
+    path: string;
+    staged: boolean;
+    submodulePath: string;
+  } | null>(null);
+
   // History view state
   const [selectedCommitHash, setSelectedCommitHash] = useState<string | null>(null);
   const [selectedCommitFile, setSelectedCommitFile] = useState<string | null>(null);
@@ -89,6 +101,17 @@ export function SourceControlPanel({
   const pullMutation = useGitPull();
   const fetchMutation = useGitFetch();
   const isSyncing = pushMutation.isPending || pullMutation.isPending;
+
+  // Submodules
+  const { data: submodules = [] } = useSubmodules(rootPath ?? null);
+
+  // Submodule file diff - fetch when a submodule file is selected
+  const { data: submoduleFileDiff, isLoading: submoduleDiffLoading } = useSubmoduleFileDiff(
+    rootPath ?? null,
+    selectedSubmoduleFile?.submodulePath ?? null,
+    selectedSubmoduleFile?.path ?? null,
+    selectedSubmoduleFile?.staged ?? false
+  );
 
   const {
     data: commitsData,
@@ -233,7 +256,33 @@ export function SourceControlPanel({
       setSelectedCommitHash(null);
       setSelectedCommitFile(null);
       setExpandedCommitHash(null);
+      setSelectedSubmoduleFile(null);
       setSelectedFile(file);
+    },
+    [setSelectedFile]
+  );
+
+  // Handle submodule toggle
+  const handleSubmoduleToggle = useCallback((submodulePath: string) => {
+    setExpandedSubmodules((prev) => {
+      const next = new Set(prev);
+      if (next.has(submodulePath)) {
+        next.delete(submodulePath);
+      } else {
+        next.add(submodulePath);
+      }
+      return next;
+    });
+  }, []);
+
+  // Handle submodule file click
+  const handleSubmoduleFileClick = useCallback(
+    (file: { path: string; staged: boolean; submodulePath: string }) => {
+      setSelectedCommitHash(null);
+      setSelectedCommitFile(null);
+      setExpandedCommitHash(null);
+      setSelectedFile(null);
+      setSelectedSubmoduleFile(file);
     },
     [setSelectedFile]
   );
@@ -423,6 +472,14 @@ export function SourceControlPanel({
                           })}
                         </div>
                       )}
+                      {fileChangesResult?.truncated && (
+                        <div className="mx-2 mt-2 rounded-md bg-muted/50 border px-3 py-2 text-xs text-muted-foreground">
+                          {t('Too many changes, showing first {{count}}.', {
+                            count:
+                              fileChangesResult.truncatedLimit ?? fileChangesResult.changes.length,
+                          })}
+                        </div>
+                      )}
                       <div className="flex-1 overflow-hidden min-h-0">
                         <ChangesList
                           staged={staged}
@@ -443,6 +500,7 @@ export function SourceControlPanel({
                           }}
                           isRefreshing={isFetching || fetchMutation.isPending}
                           repoPath={rootPath}
+                          sessionId={sessionId}
                         />
                       </div>
                       {/* Commit Box */}
@@ -573,6 +631,21 @@ export function SourceControlPanel({
                   )}
                 </AnimatePresence>
               </div>
+
+              {/* Submodules - Each submodule as a separate repository section */}
+              {submodules
+                .filter((s) => s.initialized)
+                .map((submodule) => (
+                  <SubmoduleSection
+                    key={submodule.path}
+                    submodule={submodule}
+                    rootPath={rootPath}
+                    expanded={expandedSubmodules.has(submodule.path)}
+                    onToggle={() => handleSubmoduleToggle(submodule.path)}
+                    selectedFile={selectedSubmoduleFile}
+                    onFileClick={handleSubmoduleFileClick}
+                  />
+                ))}
             </motion.div>
           )}
         </AnimatePresence>
@@ -598,6 +671,7 @@ export function SourceControlPanel({
                 rootPath={rootPath}
                 fileDiff={commitDiff}
                 filePath={selectedCommitFile}
+                isActive={isActive}
                 isLoading={commitDiffLoading}
                 onPrevFile={handlePrevCommitFile}
                 onNextFile={handleNextCommitFile}
@@ -606,11 +680,23 @@ export function SourceControlPanel({
                 sessionId={sessionId}
               />
             </div>
+          ) : selectedSubmoduleFile ? (
+            <div className="flex-1 overflow-hidden">
+              <DiffViewer
+                rootPath={`${rootPath}/${selectedSubmoduleFile.submodulePath}`.replace(/\\/g, '/')}
+                file={{ path: selectedSubmoduleFile.path, staged: selectedSubmoduleFile.staged }}
+                diff={submoduleFileDiff ?? undefined}
+                skipFetch={true}
+                isActive={isActive}
+                sessionId={sessionId}
+              />
+            </div>
           ) : (
             <div className="flex-1 overflow-hidden">
               <DiffViewer
                 rootPath={rootPath}
                 file={selectedFile}
+                isActive={isActive}
                 onPrevFile={handlePrevFile}
                 onNextFile={handleNextFile}
                 hasPrevFile={currentFileIndex > 0}

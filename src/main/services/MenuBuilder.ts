@@ -100,9 +100,29 @@ export function buildAppMenu(mainWindow: BrowserWindow, options: MenuOptions = {
           click: () => mainWindow.webContents.toggleDevTools(),
         },
         { type: 'separator' as const },
-        { role: 'resetZoom' as const },
-        { role: 'zoomIn' as const },
-        { role: 'zoomOut' as const },
+        {
+          label: t('Reset Zoom'),
+          accelerator: 'CommandOrControl+0',
+          click: () => {
+            mainWindow.webContents.setZoomLevel(0);
+          },
+        },
+        {
+          label: t('Zoom In'),
+          accelerator: 'CommandOrControl+=',
+          click: () => {
+            const currentZoom = mainWindow.webContents.getZoomLevel();
+            mainWindow.webContents.setZoomLevel(currentZoom + 0.5);
+          },
+        },
+        {
+          label: t('Zoom Out'),
+          accelerator: 'CommandOrControl+-',
+          click: () => {
+            const currentZoom = mainWindow.webContents.getZoomLevel();
+            mainWindow.webContents.setZoomLevel(currentZoom - 0.5);
+          },
+        },
         { type: 'separator' as const },
         { role: 'togglefullscreen' as const },
       ],

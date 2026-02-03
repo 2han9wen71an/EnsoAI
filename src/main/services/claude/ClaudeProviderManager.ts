@@ -18,6 +18,22 @@ function getClaudeSettingsPath(): string {
 
 let settingsWatcher: fs.FSWatcher | null = null;
 let debounceTimer: NodeJS.Timeout | null = null;
+let maxWaitTimer: NodeJS.Timeout | null = null;
+let lastProviderSnapshot: string | null = null; // 上次 Provider 配置快照
+let lastMtimeMs: number | null = null; // 文件最后修改时间
+let lastFileSize: number | null = null; // 文件大小
+
+/**
+ * 比较 Provider 配置是否变化
+ */
+function hasProviderChanged(extracted: Partial<ClaudeProvider> | null): boolean {
+  const currentSnapshot = JSON.stringify(extracted);
+  if (currentSnapshot === lastProviderSnapshot) {
+    return false;
+  }
+  lastProviderSnapshot = currentSnapshot;
+  return true;
+}
 
 /**
  * 监听 ~/.claude/settings.json 的变化
@@ -41,6 +57,9 @@ export function watchClaudeSettings(window: BrowserWindow): void {
     }
   }
 
+  // 初始化快照
+  lastProviderSnapshot = JSON.stringify(extractProviderFromSettings());
+
   // 监听目录而不是文件，因为很多编辑器保存时会先删除文件再新建
   try {
     settingsWatcher = fs.watch(configDir, (eventType, filename) => {
@@ -48,31 +67,85 @@ export function watchClaudeSettings(window: BrowserWindow): void {
       if (filename && filename === 'settings.json') {
         console.log(`[ClaudeProviderManager] Detected ${filename} change (${eventType})`);
 
-        // 防抖处理：合并短时间内的多次事件
-        if (debounceTimer) {
-          clearTimeout(debounceTimer);
-        }
+        const processChange = () => {
+          // 清理计时器
+          if (debounceTimer) {
+            clearTimeout(debounceTimer);
+            debounceTimer = null;
+          }
+          if (maxWaitTimer) {
+            clearTimeout(maxWaitTimer);
+            maxWaitTimer = null;
+          }
 
-        debounceTimer = setTimeout(() => {
           // 检查窗口是否已销毁
           if (window.isDestroyed()) {
             console.log('[ClaudeProviderManager] Window destroyed, skipping notification');
             return;
           }
 
-          // 读取新配置并推送到前端
+          // 检查文件元数据，避免无意义读取
+          try {
+            if (fs.existsSync(settingsPath)) {
+              const stats = fs.statSync(settingsPath);
+              const currentMtime = stats.mtimeMs;
+              const currentSize = stats.size;
+
+              // 如果文件未实际变化（相同修改时间和大小），跳过
+              if (
+                lastMtimeMs !== null &&
+                lastFileSize !== null &&
+                currentMtime === lastMtimeMs &&
+                currentSize === lastFileSize
+              ) {
+                console.log('[ClaudeProviderManager] File metadata unchanged, skipping read');
+                return;
+              }
+
+              lastMtimeMs = currentMtime;
+              lastFileSize = currentSize;
+            }
+          } catch (err) {
+            console.warn('[ClaudeProviderManager] Failed to check file stats:', err);
+          }
+
+          // 读取新配置
           try {
             const settings = readClaudeSettings();
             const extracted = extractProviderFromSettings();
 
-            window.webContents.send(IPC_CHANNELS.CLAUDE_PROVIDER_SETTINGS_CHANGED, {
-              settings,
-              extracted,
-            });
+            // 仅在 Provider 配置实际变化时推送通知
+            if (hasProviderChanged(extracted)) {
+              console.log('[ClaudeProviderManager] Provider config changed, notifying frontend');
+              window.webContents.send(IPC_CHANNELS.CLAUDE_PROVIDER_SETTINGS_CHANGED, {
+                settings,
+                extracted,
+              });
+            } else {
+              console.log(
+                '[ClaudeProviderManager] Provider config unchanged, skipping notification'
+              );
+            }
           } catch (err) {
             console.warn('[ClaudeProviderManager] Failed to read settings after change:', err);
           }
-        }, 150); // 150ms 防抖延迟
+        };
+
+        // 防抖处理：合并短时间内的多次事件
+        if (debounceTimer) {
+          clearTimeout(debounceTimer);
+        }
+
+        // 如果没有 maxWait 计时器在运行，启动一个
+        if (!maxWaitTimer) {
+          maxWaitTimer = setTimeout(() => {
+            processChange();
+          }, 2000); // 最多等待 2 秒
+        }
+
+        debounceTimer = setTimeout(() => {
+          processChange();
+        }, 400); // 400ms 防抖延迟
       }
     });
 
@@ -95,10 +168,17 @@ export function unwatchClaudeSettings(): void {
     clearTimeout(debounceTimer);
     debounceTimer = null;
   }
+  if (maxWaitTimer) {
+    clearTimeout(maxWaitTimer);
+    maxWaitTimer = null;
+  }
   if (settingsWatcher) {
     settingsWatcher.close();
     settingsWatcher = null;
   }
+  lastProviderSnapshot = null;
+  lastMtimeMs = null;
+  lastFileSize = null;
 }
 
 /**
@@ -120,7 +200,8 @@ export function readClaudeSettings(): ClaudeSettings | null {
 
 /**
  * 从当前 settings.json 提取 Provider 相关字段
- * 用于"保存为新配置"功能
+ * 用于配置匹配和"保存为新配置"功能
+ * 注意：不提取 model 和 smallFastModel 字段，因为这些字段会被用户临时切换模型而改变
  */
 export function extractProviderFromSettings(): Partial<ClaudeProvider> | null {
   const settings = readClaudeSettings();
@@ -131,8 +212,6 @@ export function extractProviderFromSettings(): Partial<ClaudeProvider> | null {
   return {
     baseUrl: settings.env.ANTHROPIC_BASE_URL,
     authToken: settings.env.ANTHROPIC_AUTH_TOKEN,
-    model: settings.model,
-    smallFastModel: settings.env.ANTHROPIC_SMALL_FAST_MODEL,
     defaultSonnetModel: settings.env.ANTHROPIC_DEFAULT_SONNET_MODEL,
     defaultOpusModel: settings.env.ANTHROPIC_DEFAULT_OPUS_MODEL,
     defaultHaikuModel: settings.env.ANTHROPIC_DEFAULT_HAIKU_MODEL,

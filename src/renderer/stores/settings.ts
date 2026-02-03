@@ -81,6 +81,8 @@ export type Theme = 'light' | 'dark' | 'system' | 'sync-terminal';
 
 export type LayoutMode = 'columns' | 'tree';
 
+export type SettingsDisplayMode = 'tab' | 'draggable-modal';
+
 // Apply app theme (dark/light mode)
 function applyAppTheme(theme: Theme, terminalTheme: string) {
   const root = document.documentElement;
@@ -149,6 +151,15 @@ export const BUILTIN_AGENT_IDS: BuiltinAgentId[] = [
   'opencode',
 ];
 
+// Quick Terminal settings
+export interface QuickTerminalSettings {
+  enabled: boolean;
+  buttonPosition: { x: number; y: number } | null;
+  modalPosition: { x: number; y: number } | null;
+  modalSize: { width: number; height: number } | null;
+  isOpen: boolean;
+}
+
 // Keybinding definition
 export interface TerminalKeybinding {
   key: string;
@@ -163,6 +174,7 @@ export interface MainTabKeybindings {
   switchToAgent: TerminalKeybinding;
   switchToFile: TerminalKeybinding;
   switchToTerminal: TerminalKeybinding;
+  switchToSourceControl: TerminalKeybinding;
 }
 
 // Source control keybindings
@@ -179,6 +191,13 @@ export interface SearchKeybindings {
 
 export interface GlobalKeybindings {
   runningProjects: TerminalKeybinding;
+}
+
+// Workspace panel keybindings
+export interface WorkspaceKeybindings {
+  toggleWorktree: TerminalKeybinding;
+  toggleRepository: TerminalKeybinding;
+  switchActiveWorktree: TerminalKeybinding;
 }
 
 // Unified xterm keybindings (for Terminal, Agent, and all xterm-based components)
@@ -232,8 +251,11 @@ export interface ClaudeCodeIntegrationSettings {
   selectionChangedDebounce: number; // in milliseconds
   atMentionedKeybinding: TerminalKeybinding;
   stopHookEnabled: boolean; // Enable Stop hook for precise agent completion notifications
+  permissionRequestHookEnabled: boolean; // Enable PermissionRequest hook for AskUserQuestion notifications
   statusLineEnabled: boolean; // Enable Status Line hook for displaying agent status
   statusLineFields: StatusLineFieldSettings; // Which fields to display in status line
+  showProviderSwitcher: boolean; // Show provider switcher in SessionBar
+  enableProviderDisableFeature: boolean; // Enable/disable the provider temporary disable feature
   providers: import('@shared/types').ClaudeProvider[];
 }
 
@@ -242,8 +264,11 @@ export const defaultClaudeCodeIntegrationSettings: ClaudeCodeIntegrationSettings
   selectionChangedDebounce: 300,
   atMentionedKeybinding: { key: 'm', meta: true, shift: true }, // Cmd/Ctrl+Shift+M
   stopHookEnabled: true, // Enable Stop hook for precise agent completion notifications
+  permissionRequestHookEnabled: true, // Enable PermissionRequest hook for AskUserQuestion notifications
   statusLineEnabled: false, // Disable Status Line hook by default
   statusLineFields: defaultStatusLineFieldSettings,
+  showProviderSwitcher: true,
+  enableProviderDisableFeature: false,
   providers: [],
 };
 
@@ -256,7 +281,51 @@ export interface CommitMessageGeneratorSettings {
   provider: AIProvider;
   model: string; // Dynamic based on provider
   reasoningEffort?: ReasoningEffort; // For Codex CLI
+  prompt: string; // Custom prompt template
 }
+
+// Default prompts for different languages
+export const defaultCommitPromptZh = `你是一个 Git commit message 生成助手。请根据以下信息生成规范的 commit message。
+
+要求：
+1. 遵循 Conventional Commits 规范
+2. 格式：<type>(<scope>): <description>
+3. type 包括：feat, fix, docs, style, refactor, perf, test, chore, ci, build
+4. scope 可选，表示影响范围
+5. description 使用中文，简洁明了
+6. 如果变更较复杂，可以添加正文说明
+
+参考最近的提交风格：
+{recent_commits}
+
+变更摘要：
+{staged_stat}
+
+变更详情：
+{staged_diff}
+
+请直接输出 commit message，无需解释。`;
+
+export const defaultCommitPromptEn = `You are a Git commit message generator. Generate a commit message based on the following information.
+
+Requirements:
+1. Follow Conventional Commits specification
+2. Format: <type>(<scope>): <description>
+3. Types: feat, fix, docs, style, refactor, perf, test, chore, ci, build
+4. Scope is optional, indicates the affected area
+5. Description should be concise and clear
+6. Add body for complex changes
+
+Reference recent commit style:
+{recent_commits}
+
+Changes summary:
+{staged_stat}
+
+Changes detail:
+{staged_diff}
+
+Output the commit message directly, no explanation needed.`;
 
 export const defaultCommitMessageGeneratorSettings: CommitMessageGeneratorSettings = {
   enabled: true,
@@ -264,6 +333,7 @@ export const defaultCommitMessageGeneratorSettings: CommitMessageGeneratorSettin
   timeout: 120,
   provider: 'claude-code',
   model: 'haiku',
+  prompt: defaultCommitPromptZh,
 };
 
 export interface CodeReviewSettings {
@@ -370,6 +440,11 @@ export interface EditorSettings {
   // Font
   fontSize: number;
   fontFamily: string;
+  lineHeight: number;
+  fontLigatures: boolean;
+  // Padding
+  paddingTop: number;
+  paddingBottom: number;
   // Indentation
   tabSize: number;
   insertSpaces: boolean;
@@ -402,6 +477,11 @@ export const defaultEditorSettings: EditorSettings = {
   // Font
   fontSize: 13,
   fontFamily: 'JetBrains Mono, Menlo, Monaco, Consolas, monospace',
+  lineHeight: 20,
+  fontLigatures: true,
+  // Padding
+  paddingTop: 12,
+  paddingBottom: 12,
   // Indentation
   tabSize: 2,
   insertSpaces: true,
@@ -435,6 +515,7 @@ export const defaultMainTabKeybindings: MainTabKeybindings = {
   switchToAgent: { key: '1', ctrl: true },
   switchToFile: { key: '2', ctrl: true },
   switchToTerminal: { key: '3', ctrl: true },
+  switchToSourceControl: { key: '4', ctrl: true },
 };
 
 export const defaultSourceControlKeybindings: SourceControlKeybindings = {
@@ -451,6 +532,12 @@ export const defaultGlobalKeybindings: GlobalKeybindings = {
   runningProjects: { key: 'l', meta: true },
 };
 
+export const defaultWorkspaceKeybindings: WorkspaceKeybindings = {
+  toggleWorktree: { key: 'w', meta: true, shift: true },
+  toggleRepository: { key: 'r', meta: true, shift: true },
+  switchActiveWorktree: { key: 'CapsLock', ctrl: true },
+};
+
 interface SettingsState {
   theme: Theme;
   layoutMode: LayoutMode;
@@ -464,11 +551,13 @@ interface SettingsState {
   terminalTheme: string;
   terminalRenderer: TerminalRenderer;
   terminalScrollback: number;
+  terminalOptionIsMeta: boolean;
   xtermKeybindings: XtermKeybindings;
   mainTabKeybindings: MainTabKeybindings;
   sourceControlKeybindings: SourceControlKeybindings;
   searchKeybindings: SearchKeybindings;
   globalKeybindings: GlobalKeybindings;
+  workspaceKeybindings: WorkspaceKeybindings;
   editorSettings: EditorSettings;
   agentSettings: AgentSettings;
   agentDetectionStatus: AgentDetectionStatus;
@@ -492,6 +581,15 @@ interface SettingsState {
   promptPresets: PromptPreset[];
   // Branch name generator
   branchNameGenerator: BranchNameGeneratorSettings;
+  // Settings display mode
+  settingsDisplayMode: SettingsDisplayMode;
+  settingsModalPosition: { x: number; y: number } | null;
+  // Terminal theme favorites
+  favoriteTerminalThemes: string[];
+  // Quick Terminal settings
+  quickTerminal: QuickTerminalSettings;
+  // Web Inspector settings
+  webInspectorEnabled: boolean;
 
   setTheme: (theme: Theme) => void;
   setLayoutMode: (mode: LayoutMode) => void;
@@ -505,11 +603,13 @@ interface SettingsState {
   setTerminalTheme: (theme: string) => void;
   setTerminalRenderer: (renderer: TerminalRenderer) => void;
   setTerminalScrollback: (scrollback: number) => void;
+  setTerminalOptionIsMeta: (enabled: boolean) => void;
   setXtermKeybindings: (keybindings: XtermKeybindings) => void;
   setMainTabKeybindings: (keybindings: MainTabKeybindings) => void;
   setSourceControlKeybindings: (keybindings: SourceControlKeybindings) => void;
   setSearchKeybindings: (keybindings: SearchKeybindings) => void;
   setGlobalKeybindings: (keybindings: GlobalKeybindings) => void;
+  setWorkspaceKeybindings: (keybindings: WorkspaceKeybindings) => void;
   setEditorSettings: (settings: Partial<EditorSettings>) => void;
   setAgentEnabled: (agentId: string, enabled: boolean) => void;
   setAgentDefault: (agentId: string) => void;
@@ -533,6 +633,9 @@ interface SettingsState {
     updates: Partial<import('@shared/types').ClaudeProvider>
   ) => void;
   removeClaudeProvider: (id: string) => void;
+  reorderClaudeProviders: (fromIndex: number, toIndex: number) => void;
+  setClaudeProviderEnabled: (id: string, enabled: boolean) => void;
+  setClaudeProviderOrder: (providers: import('@shared/types').ClaudeProvider[]) => void;
   setCommitMessageGenerator: (settings: Partial<CommitMessageGeneratorSettings>) => void;
   setCodeReview: (settings: Partial<CodeReviewSettings>) => void;
   setAutoUpdateEnabled: (enabled: boolean) => void;
@@ -554,6 +657,21 @@ interface SettingsState {
   setPromptPresetEnabled: (id: string) => void;
   // Branch name generator
   setBranchNameGenerator: (settings: Partial<BranchNameGeneratorSettings>) => void;
+  // Settings display mode
+  setSettingsDisplayMode: (mode: SettingsDisplayMode) => void;
+  setSettingsModalPosition: (position: { x: number; y: number } | null) => void;
+  // Terminal theme favorites
+  addFavoriteTerminalTheme: (theme: string) => void;
+  removeFavoriteTerminalTheme: (theme: string) => void;
+  toggleFavoriteTerminalTheme: (theme: string) => void;
+  // Quick Terminal methods
+  setQuickTerminalEnabled: (enabled: boolean) => void;
+  setQuickTerminalButtonPosition: (position: { x: number; y: number } | null) => void;
+  setQuickTerminalModalPosition: (position: { x: number; y: number } | null) => void;
+  setQuickTerminalModalSize: (size: { width: number; height: number } | null) => void;
+  setQuickTerminalOpen: (open: boolean) => void;
+  // Web Inspector methods
+  setWebInspectorEnabled: (enabled: boolean) => void;
 }
 
 const defaultAgentSettings: AgentSettings = {
@@ -584,11 +702,13 @@ export const useSettingsStore = create<SettingsState>()(
       terminalTheme: 'Dracula',
       terminalRenderer: 'dom',
       terminalScrollback: 10000,
+      terminalOptionIsMeta: true,
       xtermKeybindings: defaultXtermKeybindings,
       mainTabKeybindings: defaultMainTabKeybindings,
       sourceControlKeybindings: defaultSourceControlKeybindings,
       searchKeybindings: defaultSearchKeybindings,
       globalKeybindings: defaultGlobalKeybindings,
+      workspaceKeybindings: defaultWorkspaceKeybindings,
       editorSettings: defaultEditorSettings,
       agentSettings: defaultAgentSettings,
       agentDetectionStatus: defaultAgentDetectionStatus,
@@ -615,6 +735,21 @@ export const useSettingsStore = create<SettingsState>()(
       mcpServers: [],
       promptPresets: [],
       branchNameGenerator: defaultBranchNameGeneratorSettings,
+      // Settings display mode
+      settingsDisplayMode: 'tab', // 默认使用 Tab 模式（保持向后兼容）
+      settingsModalPosition: null, // 首次打开居中
+      // Terminal theme favorites
+      favoriteTerminalThemes: [],
+      // Quick Terminal defaults
+      quickTerminal: {
+        enabled: true,
+        buttonPosition: null,
+        modalPosition: null,
+        modalSize: null,
+        isOpen: false,
+      },
+      // Web Inspector defaults
+      webInspectorEnabled: false,
 
       setTheme: (theme) => {
         const terminalTheme = get().terminalTheme;
@@ -653,11 +788,13 @@ export const useSettingsStore = create<SettingsState>()(
       },
       setTerminalRenderer: (terminalRenderer) => set({ terminalRenderer }),
       setTerminalScrollback: (terminalScrollback) => set({ terminalScrollback }),
+      setTerminalOptionIsMeta: (terminalOptionIsMeta) => set({ terminalOptionIsMeta }),
       setXtermKeybindings: (xtermKeybindings) => set({ xtermKeybindings }),
       setMainTabKeybindings: (mainTabKeybindings) => set({ mainTabKeybindings }),
       setSourceControlKeybindings: (sourceControlKeybindings) => set({ sourceControlKeybindings }),
       setSearchKeybindings: (searchKeybindings) => set({ searchKeybindings }),
       setGlobalKeybindings: (globalKeybindings) => set({ globalKeybindings }),
+      setWorkspaceKeybindings: (workspaceKeybindings) => set({ workspaceKeybindings }),
       setEditorSettings: (settings) =>
         set((state) => ({
           editorSettings: { ...state.editorSettings, ...settings },
@@ -773,6 +910,36 @@ export const useSettingsStore = create<SettingsState>()(
             providers: state.claudeCodeIntegration.providers.filter((p) => p.id !== id),
           },
         })),
+      reorderClaudeProviders: (fromIndex, toIndex) =>
+        set((state) => {
+          const providers = [...state.claudeCodeIntegration.providers];
+          const [removed] = providers.splice(fromIndex, 1);
+          providers.splice(toIndex, 0, removed);
+          // 更新 displayOrder
+          const reordered = providers.map((p, index) => ({ ...p, displayOrder: index }));
+          return {
+            claudeCodeIntegration: {
+              ...state.claudeCodeIntegration,
+              providers: reordered,
+            },
+          };
+        }),
+      setClaudeProviderOrder: (providers) =>
+        set((state) => ({
+          claudeCodeIntegration: {
+            ...state.claudeCodeIntegration,
+            providers: providers.map((p, index) => ({ ...p, displayOrder: index })),
+          },
+        })),
+      setClaudeProviderEnabled: (id, enabled) =>
+        set((state) => ({
+          claudeCodeIntegration: {
+            ...state.claudeCodeIntegration,
+            providers: state.claudeCodeIntegration.providers.map((p) =>
+              p.id === id ? { ...p, enabled } : p
+            ),
+          },
+        })),
       setCommitMessageGenerator: (settings) =>
         set((state) => ({
           commitMessageGenerator: { ...state.commitMessageGenerator, ...settings },
@@ -849,6 +1016,65 @@ export const useSettingsStore = create<SettingsState>()(
         set((state) => ({
           branchNameGenerator: { ...state.branchNameGenerator, ...settings },
         })),
+      // Settings display mode
+      setSettingsDisplayMode: (mode) => {
+        set({ settingsDisplayMode: mode });
+      },
+      setSettingsModalPosition: (position) => {
+        set({ settingsModalPosition: position });
+      },
+      // Terminal theme favorites
+      addFavoriteTerminalTheme: (theme) =>
+        set((state) => ({
+          favoriteTerminalThemes: state.favoriteTerminalThemes.includes(theme)
+            ? state.favoriteTerminalThemes
+            : [...state.favoriteTerminalThemes, theme],
+        })),
+      removeFavoriteTerminalTheme: (theme) =>
+        set((state) => ({
+          favoriteTerminalThemes: state.favoriteTerminalThemes.filter((t) => t !== theme),
+        })),
+      toggleFavoriteTerminalTheme: (theme) =>
+        set((state) => ({
+          favoriteTerminalThemes: state.favoriteTerminalThemes.includes(theme)
+            ? state.favoriteTerminalThemes.filter((t) => t !== theme)
+            : [...state.favoriteTerminalThemes, theme],
+        })),
+      // Quick Terminal methods
+      setQuickTerminalEnabled: (enabled) =>
+        set((state) => ({
+          quickTerminal: { ...state.quickTerminal, enabled },
+        })),
+      setQuickTerminalButtonPosition: (position) =>
+        set((state) => ({
+          quickTerminal: { ...state.quickTerminal, buttonPosition: position },
+        })),
+      setQuickTerminalModalPosition: (position) =>
+        set((state) => ({
+          quickTerminal: { ...state.quickTerminal, modalPosition: position },
+        })),
+      setQuickTerminalModalSize: (size) =>
+        set((state) => ({
+          quickTerminal: { ...state.quickTerminal, modalSize: size },
+        })),
+      setQuickTerminalOpen: (open) =>
+        set((state) => ({
+          quickTerminal: { ...state.quickTerminal, isOpen: open },
+        })),
+      // Web Inspector methods
+      setWebInspectorEnabled: async (enabled) => {
+        set({ webInspectorEnabled: enabled });
+        // Notify main process to start/stop Web Inspector server
+        if (enabled) {
+          const result = await window.electronAPI.webInspector.start();
+          if (!result.success) {
+            console.error('[WebInspector] Failed to start:', result.error);
+            set({ webInspectorEnabled: false });
+          }
+        } else {
+          await window.electronAPI.webInspector.stop();
+        }
+      },
     }),
     {
       name: 'enso-settings',
@@ -943,6 +1169,10 @@ export const useSettingsStore = create<SettingsState>()(
             ...currentState.globalKeybindings,
             ...persisted.globalKeybindings,
           },
+          workspaceKeybindings: {
+            ...currentState.workspaceKeybindings,
+            ...persisted.workspaceKeybindings,
+          },
           editorSettings: {
             ...currentState.editorSettings,
             ...persisted.editorSettings,
@@ -985,6 +1215,11 @@ export const useSettingsStore = create<SettingsState>()(
           // MCP, Prompts - use persisted or defaults
           mcpServers: persisted.mcpServers ?? currentState.mcpServers,
           promptPresets: persisted.promptPresets ?? currentState.promptPresets,
+          // Quick Terminal - deep merge with defaults
+          quickTerminal: {
+            ...currentState.quickTerminal,
+            ...persisted.quickTerminal,
+          },
         };
       },
       onRehydrateStorage: () => (state) => {
@@ -1003,6 +1238,13 @@ export const useSettingsStore = create<SettingsState>()(
         if (state) {
           if (state.proxySettings) {
             window.electronAPI.app.setProxy(state.proxySettings);
+          }
+
+          // Auto-start Web Inspector server if it was enabled
+          if (state.webInspectorEnabled) {
+            window.electronAPI.webInspector.start().catch((error) => {
+              console.error('[WebInspector] Failed to auto-start:', error);
+            });
           }
 
           // TODO: Remove this cleanup block after v1.0 release (along with xtermKeybindings migration)

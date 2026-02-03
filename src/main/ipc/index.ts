@@ -1,4 +1,7 @@
+import { stopAllCodeReviews } from '../services/ai';
 import { disposeClaudeIdeBridge } from '../services/claude/ClaudeIdeBridge';
+import { autoUpdaterService } from '../services/updater/AutoUpdater';
+import { webInspectorServer } from '../services/webInspector';
 import { registerAgentHandlers } from './agent';
 import { registerAppHandlers } from './app';
 import { registerClaudeConfigHandlers } from './claudeConfig';
@@ -21,6 +24,7 @@ import {
   registerTerminalHandlers,
 } from './terminal';
 import { registerUpdaterHandlers } from './updater';
+import { registerWebInspectorHandlers } from './webInspector';
 import { clearAllWorktreeServices, registerWorktreeHandlers } from './worktree';
 
 export function registerIpcHandlers(): void {
@@ -40,6 +44,7 @@ export function registerIpcHandlers(): void {
   registerHapiHandlers();
   registerClaudeProviderHandlers();
   registerClaudeConfigHandlers();
+  registerWebInspectorHandlers();
 }
 
 export async function cleanupAllResources(): Promise<void> {
@@ -47,6 +52,12 @@ export async function cleanupAllResources(): Promise<void> {
 
   // Stop Hapi server first (sync, fast)
   cleanupHapi();
+
+  // Stop Web Inspector server (sync, fast)
+  webInspectorServer.stop();
+
+  // Stop all code review processes (sync, fast)
+  stopAllCodeReviews();
 
   // Destroy all PTY sessions and wait for them to exit
   // This prevents crashes when PTY exit callbacks fire during Node cleanup
@@ -79,6 +90,8 @@ export async function cleanupAllResources(): Promise<void> {
   clearAllGitServices();
   clearAllWorktreeServices();
 
+  autoUpdaterService.cleanup();
+
   // Dispose Claude IDE Bridge
   disposeClaudeIdeBridge();
 }
@@ -94,8 +107,14 @@ export function cleanupAllResourcesSync(): void {
   // Kill Hapi/Cloudflared processes (sync)
   cleanupHapi();
 
+  // Stop Web Inspector server (sync)
+  webInspectorServer.stop();
+
   // Kill all PTY sessions immediately (sync)
   destroyAllTerminals();
+
+  // Stop all code review processes (sync)
+  stopAllCodeReviews();
 
   // Stop file watchers (sync)
   stopAllFileWatchersSync();
@@ -103,6 +122,8 @@ export function cleanupAllResourcesSync(): void {
   // Clear service caches (sync)
   clearAllGitServices();
   clearAllWorktreeServices();
+
+  autoUpdaterService.cleanup();
 
   // Dispose Claude IDE Bridge (sync)
   disposeClaudeIdeBridge();

@@ -1,6 +1,6 @@
 import { Plus, Terminal } from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { normalizePath } from '@/App/storage';
+import { cleanPath, normalizePath } from '@/App/storage';
 import { Button } from '@/components/ui/button';
 import {
   Empty,
@@ -10,6 +10,7 @@ import {
   EmptyTitle,
 } from '@/components/ui/empty';
 import { useI18n } from '@/i18n';
+import { defaultDarkTheme, getXtermTheme } from '@/lib/ghosttyTheme';
 import { matchesKeybinding } from '@/lib/keybinding';
 import { useInitScriptStore } from '@/stores/initScript';
 import { useSettingsStore } from '@/stores/settings';
@@ -31,13 +32,17 @@ interface GroupState {
   activeGroupId: string | null;
   // Flex percentages for each group
   flexPercents: number[];
+  // Original path with correct case (used for terminal cwd)
+  // Optional in interface because updateCurrentState auto-fills it
+  originalPath?: string;
 }
 
-function createInitialGroupState(): GroupState {
+function createInitialGroupState(originalPath = ''): GroupState {
   return {
     groups: [],
     activeGroupId: null,
     flexPercents: [],
+    originalPath,
   };
 }
 
@@ -53,6 +58,10 @@ export function TerminalPanel({ cwd, isActive = false }: TerminalPanelProps) {
   const autoCreateSessionOnActivate = useSettingsStore(
     (state) => state.autoCreateSessionOnActivate
   );
+  const terminalTheme = useSettingsStore((state) => state.terminalTheme);
+  const terminalBgColor = useMemo(() => {
+    return getXtermTheme(terminalTheme)?.background ?? defaultDarkTheme.background;
+  }, [terminalTheme]);
   const { setTerminalCount, registerTerminalCloseHandler } = useWorktreeActivityStore();
   const syncTerminalSessions = useTerminalStore((s) => s.syncSessions);
   const { pendingScript, clearPendingScript } = useInitScriptStore();
@@ -62,7 +71,12 @@ export function TerminalPanel({ cwd, isActive = false }: TerminalPanelProps) {
   const currentState = useMemo(() => {
     if (!cwd) return createInitialGroupState();
     const normalizedCwd = normalizePath(cwd);
-    return worktreeStates[normalizedCwd] || createInitialGroupState();
+    const existingState = worktreeStates[normalizedCwd];
+    if (existingState) {
+      // Update originalPath if cwd has changed (in case of case difference)
+      return { ...existingState, originalPath: cleanPath(cwd) };
+    }
+    return createInitialGroupState(cleanPath(cwd));
   }, [cwd, worktreeStates]);
 
   const { groups, activeGroupId } = currentState;
@@ -131,10 +145,19 @@ export function TerminalPanel({ cwd, isActive = false }: TerminalPanelProps) {
     (updater: (state: GroupState) => GroupState) => {
       if (!cwd) return;
       const normalizedCwd = normalizePath(cwd);
-      setWorktreeStates((prev) => ({
-        ...prev,
-        [normalizedCwd]: updater(prev[normalizedCwd] || createInitialGroupState()),
-      }));
+      const cleanedCwd = cleanPath(cwd);
+      setWorktreeStates((prev) => {
+        const currentState = prev[normalizedCwd] || createInitialGroupState(cleanedCwd);
+        const newState = updater(currentState);
+        // Ensure originalPath is always preserved
+        return {
+          ...prev,
+          [normalizedCwd]: {
+            ...newState,
+            originalPath: newState.originalPath || currentState.originalPath || cleanedCwd,
+          },
+        };
+      });
     },
     [cwd]
   );
@@ -732,15 +755,17 @@ export function TerminalPanel({ cwd, isActive = false }: TerminalPanelProps) {
 
   if (!cwd) {
     return (
-      <Empty className="h-full">
-        <EmptyMedia variant="icon">
-          <Terminal className="h-4.5 w-4.5" />
-        </EmptyMedia>
-        <EmptyHeader>
-          <EmptyTitle>{t('Terminal')}</EmptyTitle>
-          <EmptyDescription>{t('Select a Worktree to open terminal')}</EmptyDescription>
-        </EmptyHeader>
-      </Empty>
+      <div className="h-full bg-background flex items-center justify-center">
+        <Empty className="border-0">
+          <EmptyMedia variant="icon">
+            <Terminal className="h-4.5 w-4.5" />
+          </EmptyMedia>
+          <EmptyHeader>
+            <EmptyTitle>{t('Terminal')}</EmptyTitle>
+            <EmptyDescription>{t('Select a Worktree to open terminal')}</EmptyDescription>
+          </EmptyHeader>
+        </Empty>
+      </div>
     );
   }
 
@@ -778,7 +803,7 @@ export function TerminalPanel({ cwd, isActive = false }: TerminalPanelProps) {
   };
 
   return (
-    <div className="relative h-full w-full">
+    <div className="relative h-full w-full" style={{ backgroundColor: terminalBgColor }}>
       {/* Empty state overlay - shown when current worktree has no terminals */}
       {/* IMPORTANT: Don't use early return here - terminals must stay mounted to prevent PTY destruction */}
       {showEmptyState && (
@@ -813,7 +838,7 @@ export function TerminalPanel({ cwd, isActive = false }: TerminalPanelProps) {
             }
           >
             {/* Tab bars row - flex layout */}
-            <div className="flex h-9 w-full">
+            <div className="flex h-9 w-full bg-background">
               {state.groups.map((group, index) => (
                 <div
                   key={group.id}
@@ -822,7 +847,7 @@ export function TerminalPanel({ cwd, isActive = false }: TerminalPanelProps) {
                 >
                   <TerminalGroup
                     group={group}
-                    cwd={worktreePath}
+                    cwd={state.originalPath || worktreePath}
                     isGroupActive={group.id === state.activeGroupId}
                     onTabsChange={handleTabsChange}
                     onGroupClick={() => handleGroupClick(group.id)}
@@ -849,7 +874,7 @@ export function TerminalPanel({ cwd, isActive = false }: TerminalPanelProps) {
             })}
 
             {/* All terminals - rendered in a single container with stable keys */}
-            <div className="absolute left-0 right-0 bottom-0 z-0" style={{ top: 36 }}>
+            <div className="absolute left-2 right-2 bottom-2 z-0" style={{ top: 44 }}>
               {Array.from(globalTerminalIds).map((tabId) => {
                 const info = findTabInfo(tabId);
                 if (!info) return null;

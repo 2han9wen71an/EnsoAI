@@ -11,6 +11,7 @@ import type {
   ContentSearchResult,
   CustomAgent,
   DetectedApp,
+  FileChange,
   FileChangeEvent,
   FileChangesResult,
   FileDiff,
@@ -22,6 +23,7 @@ import type {
   GitBranch,
   GitLogEntry,
   GitStatus,
+  GitSubmodule,
   GitWorktree,
   McpServer,
   McpServerConfig,
@@ -42,7 +44,8 @@ import type {
   WorktreeRemoveOptions,
 } from '@shared/types';
 import { IPC_CHANNELS } from '@shared/types';
-import { contextBridge, ipcRenderer, shell } from 'electron';
+import type { InspectPayload, WebInspectorStatus } from '@shared/types/webInspector';
+import { contextBridge, ipcRenderer, shell, webUtils } from 'electron';
 import pkg from '../../package.json';
 
 const electronAPI = {
@@ -105,6 +108,7 @@ const electronAPI = {
         provider: string;
         model: string;
         reasoningEffort?: string;
+        prompt?: string;
       }
     ): Promise<{ success: boolean; message?: string; error?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.GIT_GENERATE_COMMIT_MSG, workdir, options),
@@ -121,8 +125,9 @@ const electronAPI = {
         reasoningEffort?: string;
         reviewId: string;
         language?: string;
+        sessionId?: string; // Restore this parameter for "Continue Conversation"
       }
-    ): Promise<{ success: boolean; error?: string }> =>
+    ): Promise<{ success: boolean; error?: string; sessionId?: string }> =>
       ipcRenderer.invoke(IPC_CHANNELS.GIT_CODE_REVIEW_START, workdir, options),
     stopCodeReview: (reviewId: string): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.GIT_CODE_REVIEW_STOP, reviewId),
@@ -163,6 +168,60 @@ const electronAPI = {
       ipcRenderer.on(IPC_CHANNELS.GIT_CLONE_PROGRESS, handler);
       return () => ipcRenderer.off(IPC_CHANNELS.GIT_CLONE_PROGRESS, handler);
     },
+    // Git Auto Fetch
+    setAutoFetchEnabled: (enabled: boolean): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_AUTO_FETCH_SET_ENABLED, enabled),
+    onAutoFetchCompleted: (callback: (data: { timestamp: number }) => void): (() => void) => {
+      const handler = (_: unknown, data: { timestamp: number }) => callback(data);
+      ipcRenderer.on(IPC_CHANNELS.GIT_AUTO_FETCH_COMPLETED, handler);
+      return () => ipcRenderer.off(IPC_CHANNELS.GIT_AUTO_FETCH_COMPLETED, handler);
+    },
+    // Git Submodule
+    listSubmodules: (workdir: string): Promise<GitSubmodule[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_SUBMODULE_LIST, workdir),
+    initSubmodules: (workdir: string, recursive?: boolean): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_SUBMODULE_INIT, workdir, recursive),
+    updateSubmodules: (workdir: string, recursive?: boolean): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_SUBMODULE_UPDATE, workdir, recursive),
+    syncSubmodules: (workdir: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_SUBMODULE_SYNC, workdir),
+    fetchSubmodule: (workdir: string, submodulePath: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_SUBMODULE_FETCH, workdir, submodulePath),
+    pullSubmodule: (workdir: string, submodulePath: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_SUBMODULE_PULL, workdir, submodulePath),
+    pushSubmodule: (workdir: string, submodulePath: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_SUBMODULE_PUSH, workdir, submodulePath),
+    commitSubmodule: (workdir: string, submodulePath: string, message: string): Promise<string> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_SUBMODULE_COMMIT, workdir, submodulePath, message),
+    stageSubmodule: (workdir: string, submodulePath: string, paths: string[]): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_SUBMODULE_STAGE, workdir, submodulePath, paths),
+    unstageSubmodule: (workdir: string, submodulePath: string, paths: string[]): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_SUBMODULE_UNSTAGE, workdir, submodulePath, paths),
+    discardSubmodule: (workdir: string, submodulePath: string, paths: string[]): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_SUBMODULE_DISCARD, workdir, submodulePath, paths),
+    getSubmoduleChanges: (workdir: string, submodulePath: string): Promise<FileChange[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_SUBMODULE_CHANGES, workdir, submodulePath),
+    getSubmoduleFileDiff: (
+      workdir: string,
+      submodulePath: string,
+      filePath: string,
+      staged: boolean
+    ): Promise<FileDiff> =>
+      ipcRenderer.invoke(
+        IPC_CHANNELS.GIT_SUBMODULE_FILE_DIFF,
+        workdir,
+        submodulePath,
+        filePath,
+        staged
+      ),
+    getSubmoduleBranches: (workdir: string, submodulePath: string): Promise<GitBranch[]> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_SUBMODULE_BRANCHES, workdir, submodulePath),
+    checkoutSubmoduleBranch: (
+      workdir: string,
+      submodulePath: string,
+      branch: string
+    ): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.GIT_SUBMODULE_CHECKOUT, workdir, submodulePath, branch),
   },
 
   // Worktree
@@ -213,12 +272,41 @@ const electronAPI = {
       ipcRenderer.invoke(IPC_CHANNELS.FILE_RENAME, fromPath, toPath),
     move: (fromPath: string, toPath: string): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.FILE_MOVE, fromPath, toPath),
+    copy: (sourcePath: string, targetPath: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.FILE_COPY, sourcePath, targetPath),
+    checkConflicts: (
+      sources: string[],
+      targetDir: string
+    ): Promise<
+      Array<{
+        path: string;
+        name: string;
+        sourceSize: number;
+        targetSize: number;
+        sourceModified: number;
+        targetModified: number;
+      }>
+    > => ipcRenderer.invoke(IPC_CHANNELS.FILE_CHECK_CONFLICTS, sources, targetDir),
+    batchCopy: (
+      sources: string[],
+      targetDir: string,
+      conflicts: Array<{ path: string; action: 'replace' | 'skip' | 'rename'; newName?: string }>
+    ): Promise<{ success: string[]; failed: Array<{ path: string; error: string }> }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.FILE_BATCH_COPY, sources, targetDir, conflicts),
+    batchMove: (
+      sources: string[],
+      targetDir: string,
+      conflicts: Array<{ path: string; action: 'replace' | 'skip' | 'rename'; newName?: string }>
+    ): Promise<{ success: string[]; failed: Array<{ path: string; error: string }> }> =>
+      ipcRenderer.invoke(IPC_CHANNELS.FILE_BATCH_MOVE, sources, targetDir, conflicts),
     delete: (targetPath: string, options?: { recursive?: boolean }): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.FILE_DELETE, targetPath, options),
     list: (dirPath: string, gitRoot?: string): Promise<FileEntry[]> =>
       ipcRenderer.invoke(IPC_CHANNELS.FILE_LIST, dirPath, gitRoot),
     exists: (filePath: string): Promise<boolean> =>
       ipcRenderer.invoke(IPC_CHANNELS.FILE_EXISTS, filePath),
+    revealInFileManager: (filePath: string): Promise<void> =>
+      ipcRenderer.invoke(IPC_CHANNELS.FILE_REVEAL_IN_FILE_MANAGER, filePath),
     watchStart: (dirPath: string): Promise<void> =>
       ipcRenderer.invoke(IPC_CHANNELS.FILE_WATCH_START, dirPath),
     watchStop: (dirPath: string): Promise<void> =>
@@ -426,6 +514,14 @@ const electronAPI = {
       const handler = (_: unknown, data: { sessionId: string }) => callback(data);
       ipcRenderer.on(IPC_CHANNELS.AGENT_STOP_NOTIFICATION, handler);
       return () => ipcRenderer.off(IPC_CHANNELS.AGENT_STOP_NOTIFICATION, handler);
+    },
+    onAskUserQuestion: (
+      callback: (data: { sessionId: string; toolInput: unknown }) => void
+    ): (() => void) => {
+      const handler = (_: unknown, data: { sessionId: string; toolInput: unknown }) =>
+        callback(data);
+      ipcRenderer.on(IPC_CHANNELS.AGENT_ASK_USER_QUESTION_NOTIFICATION, handler);
+      return () => ipcRenderer.off(IPC_CHANNELS.AGENT_ASK_USER_QUESTION_NOTIFICATION, handler);
     },
     onAgentStatusUpdate: (
       callback: (data: {
@@ -718,6 +814,31 @@ const electronAPI = {
       ) => callback(status);
       ipcRenderer.on(IPC_CHANNELS.CLOUDFLARED_STATUS_CHANGED, handler);
       return () => ipcRenderer.off(IPC_CHANNELS.CLOUDFLARED_STATUS_CHANGED, handler);
+    },
+  },
+
+  // Web Inspector
+  webInspector: {
+    start: (): Promise<{ success: boolean; error?: string }> =>
+      ipcRenderer.invoke('web-inspector:start'),
+    stop: (): Promise<void> => ipcRenderer.invoke('web-inspector:stop'),
+    status: (): Promise<WebInspectorStatus> => ipcRenderer.invoke('web-inspector:status'),
+    onStatusChange: (callback: (status: WebInspectorStatus) => void): (() => void) => {
+      const handler = (_: unknown, status: WebInspectorStatus) => callback(status);
+      ipcRenderer.on('web-inspector:status-change', handler);
+      return () => ipcRenderer.off('web-inspector:status-change', handler);
+    },
+    onData: (callback: (data: InspectPayload) => void): (() => void) => {
+      const handler = (_: unknown, data: InspectPayload) => callback(data);
+      ipcRenderer.on('web-inspector:data', handler);
+      return () => ipcRenderer.off('web-inspector:data', handler);
+    },
+  },
+
+  // Utilities
+  utils: {
+    getPathForFile: (file: File): string => {
+      return webUtils.getPathForFile(file);
     },
   },
 };

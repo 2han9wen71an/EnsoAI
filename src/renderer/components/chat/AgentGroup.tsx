@@ -22,6 +22,10 @@ interface AgentGroupProps {
   onSessionRename: (sessionId: string, name: string) => void;
   onSessionReorder: (fromIndex: number, toIndex: number) => void;
   onGroupClick: () => void;
+  // Quick Terminal props
+  quickTerminalOpen?: boolean;
+  quickTerminalHasProcess?: boolean;
+  onToggleQuickTerminal?: () => void;
 }
 
 export function AgentGroup({
@@ -38,14 +42,19 @@ export function AgentGroup({
   onSessionRename,
   onSessionReorder,
   onGroupClick,
+  quickTerminalOpen,
+  quickTerminalHasProcess,
+  onToggleQuickTerminal,
 }: AgentGroupProps) {
   const { t } = useI18n();
   const [showAgentMenu, setShowAgentMenu] = useState(false);
 
-  // Filter sessions belonging to this group
+  // Get sessions belonging to this group, preserving group.sessionIds order (for drag reorder)
   const groupSessions = useMemo(() => {
-    const sessionIdSet = new Set(group.sessionIds);
-    return sessions.filter((s) => sessionIdSet.has(s.id));
+    const sessionMap = new Map(sessions.map((s) => [s.id, s]));
+    return group.sessionIds
+      .map((id) => sessionMap.get(id))
+      .filter((s): s is Session => s !== undefined);
   }, [sessions, group.sessionIds]);
 
   const activeSessionId = group.activeSessionId;
@@ -68,7 +77,7 @@ export function AgentGroup({
     return (
       // biome-ignore lint/a11y/useKeyWithClickEvents: click activates group
       <div
-        className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-muted-foreground bg-background pointer-events-auto"
+        className="absolute inset-0 flex flex-col items-center justify-center gap-4 text-muted-foreground pointer-events-auto bg-background"
         onClick={onGroupClick}
       >
         <Sparkles className="h-12 w-12 opacity-50" />
@@ -149,6 +158,9 @@ export function AgentGroup({
       onNewSessionWithAgent={onSessionNewWithAgent}
       onRenameSession={onSessionRename}
       onReorderSessions={onSessionReorder}
+      quickTerminalOpen={quickTerminalOpen}
+      quickTerminalHasProcess={quickTerminalHasProcess}
+      onToggleQuickTerminal={onToggleQuickTerminal}
     />
   );
 }

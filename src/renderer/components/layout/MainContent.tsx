@@ -1,5 +1,14 @@
 import { AnimatePresence, motion } from 'framer-motion';
-import { FileCode, FolderOpen, GitBranch, MessageSquare, Sparkles, Terminal } from 'lucide-react';
+import {
+  FileCode,
+  FolderOpen,
+  GitBranch,
+  MessageSquare,
+  RectangleEllipsis,
+  Settings,
+  Sparkles,
+  Terminal,
+} from 'lucide-react';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { DEFAULT_TAB_ORDER, type TabId } from '@/App/constants';
 import { normalizePath } from '@/App/storage';
@@ -7,6 +16,8 @@ import { OpenInMenu } from '@/components/app/OpenInMenu';
 import { AgentPanel } from '@/components/chat/AgentPanel';
 import { FilePanel } from '@/components/files';
 import { RunningProjectsPopover } from '@/components/layout/RunningProjectsPopover';
+import { SettingsContent } from '@/components/settings';
+import type { SettingsCategory } from '@/components/settings/constants';
 import { SourceControlPanel } from '@/components/source-control';
 import { DiffReviewModal } from '@/components/source-control/DiffReviewModal';
 import { Button } from '@/components/ui/button';
@@ -21,6 +32,7 @@ import { useI18n } from '@/i18n';
 import { springFast } from '@/lib/motion';
 import { cn } from '@/lib/utils';
 import { useAgentSessionsStore } from '@/stores/agentSessions';
+import { useSettingsStore } from '@/stores/settings';
 import { TerminalPanel } from '../terminal';
 
 type LayoutMode = 'columns' | 'tree';
@@ -39,6 +51,11 @@ interface MainContentProps {
   onExpandWorktree?: () => void;
   onSwitchWorktree?: (worktreePath: string) => void;
   onSwitchTab?: (tab: TabId) => void;
+  isSettingsActive?: boolean;
+  settingsCategory?: SettingsCategory;
+  onCategoryChange?: (category: SettingsCategory) => void;
+  scrollToProvider?: boolean;
+  onToggleSettings?: () => void;
 }
 
 export function MainContent({
@@ -55,8 +72,15 @@ export function MainContent({
   onExpandWorktree,
   onSwitchWorktree,
   onSwitchTab,
+  isSettingsActive = false,
+  settingsCategory,
+  onCategoryChange,
+  scrollToProvider,
+  onToggleSettings,
 }: MainContentProps) {
   const { t } = useI18n();
+  const settingsDisplayMode = useSettingsStore((s) => s.settingsDisplayMode);
+  const setSettingsDisplayMode = useSettingsStore((s) => s.setSettingsDisplayMode);
 
   // Diff Review Modal state
   const [isReviewModalOpen, setIsReviewModalOpen] = useState(false);
@@ -76,18 +100,28 @@ export function MainContent({
     return firstSession?.id ?? null;
   }, [repoPath, worktreePath, sessions, activeIds]);
 
-  // Tab metadata configuration
-  const tabConfigMap: Record<TabId, { icon: React.ElementType; label: string }> = {
+  // Tab metadata configuration (excludes 'settings' as it's not shown in the tab bar)
+  const tabConfigMap: Record<
+    Exclude<TabId, 'settings'>,
+    { icon: React.ElementType; label: string }
+  > = {
     chat: { icon: Sparkles, label: t('Agent') },
     file: { icon: FileCode, label: t('File') },
     terminal: { icon: Terminal, label: t('Terminal') },
     'source-control': { icon: GitBranch, label: t('Version Control') },
   };
 
-  // Generate tabs array based on tabOrder
-  const tabs = tabOrder.map(
-    (id) => ({ id, ...tabConfigMap[id] }) as { id: TabId; icon: React.ElementType; label: string }
-  );
+  // Generate tabs array based on tabOrder (filter out 'settings' tab)
+  const tabs = tabOrder
+    .filter((id): id is Exclude<TabId, 'settings'> => id !== 'settings')
+    .map(
+      (id) =>
+        ({ id, ...tabConfigMap[id] }) as {
+          id: Exclude<TabId, 'settings'>;
+          icon: React.ElementType;
+          label: string;
+        }
+    );
 
   // Drag reorder state
   const [draggedIndex, setDraggedIndex] = useState<number | null>(null);
@@ -191,11 +225,11 @@ export function MainContent({
   const hasActiveWorktree = Boolean(repoPath && worktreePath);
 
   return (
-    <main className="flex min-w-[535px] flex-1 flex-col overflow-hidden bg-background">
+    <main className={cn('flex min-w-[535px] flex-1 flex-col overflow-hidden bg-background')}>
       {/* Header with tabs */}
       <header
         className={cn(
-          'flex h-12 shrink-0 items-center justify-between border-b px-4 drag-region',
+          'flex h-12 shrink-0 items-center justify-between border-b px-4 drag-region bg-background',
           needsTrafficLightPadding && 'pl-[80px]'
         )}
       >
@@ -314,8 +348,22 @@ export function MainContent({
           })}
         </div>
 
-        {/* Right: Review button + Open In Menu */}
+        {/* Right: Settings + Review button + Open In Menu */}
         <div className="flex items-center gap-2 no-drag">
+          {/* Settings button */}
+          <button
+            type="button"
+            className={cn(
+              'flex h-8 w-8 items-center justify-center rounded-md transition-colors',
+              isSettingsActive
+                ? 'bg-accent text-accent-foreground'
+                : 'text-muted-foreground hover:bg-accent/50 hover:text-foreground'
+            )}
+            onClick={onToggleSettings}
+            title={t('Settings')}
+          >
+            <Settings className="h-4 w-4" />
+          </button>
           {activeSessionId && (
             <Button
               variant="outline"
@@ -373,23 +421,25 @@ export function MainContent({
               )}
             </>
           ) : (
-            <Empty className="h-full border-0">
-              <EmptyMedia variant="icon">
-                <Sparkles className="h-4.5 w-4.5" />
-              </EmptyMedia>
-              <EmptyHeader>
-                <EmptyTitle>{t('Start using AI Agent')}</EmptyTitle>
-                <EmptyDescription>
-                  {t('Select a Worktree to start using AI coding assistant')}
-                </EmptyDescription>
-              </EmptyHeader>
-              {onExpandWorktree && worktreeCollapsed && (
-                <Button onClick={onExpandWorktree} variant="outline" className="mt-2">
-                  <GitBranch className="mr-2 h-4 w-4" />
-                  {t('Choose Worktree')}
-                </Button>
-              )}
-            </Empty>
+            <div className="h-full bg-background flex items-center justify-center">
+              <Empty className="border-0">
+                <EmptyMedia variant="icon">
+                  <Sparkles className="h-4.5 w-4.5" />
+                </EmptyMedia>
+                <EmptyHeader>
+                  <EmptyTitle>{t('Start using AI Agent')}</EmptyTitle>
+                  <EmptyDescription>
+                    {t('Select a Worktree to start using AI coding assistant')}
+                  </EmptyDescription>
+                </EmptyHeader>
+                {onExpandWorktree && worktreeCollapsed && (
+                  <Button onClick={onExpandWorktree} variant="outline" className="mt-2">
+                    <GitBranch className="mr-2 h-4 w-4" />
+                    {t('Choose Worktree')}
+                  </Button>
+                )}
+              </Empty>
+            </div>
           )}
         </div>
         {/* Terminal tab - keep mounted to preserve shell sessions */}
@@ -432,6 +482,37 @@ export function MainContent({
             sessionId={activeSessionId}
           />
         </div>
+        {/* Settings tab */}
+        {settingsDisplayMode === 'tab' && (
+          <div
+            className={cn(
+              'absolute inset-0 bg-background',
+              activeTab === 'settings' ? 'z-10' : 'invisible pointer-events-none z-0'
+            )}
+          >
+            <div className="h-full flex flex-col">
+              <div className="flex items-center justify-between border-b px-4 py-3">
+                <h1 className="text-lg font-medium">{t('Settings')}</h1>
+                <button
+                  type="button"
+                  onClick={() => setSettingsDisplayMode('draggable-modal')}
+                  className="flex h-6 items-center gap-1 rounded px-2 text-xs text-muted-foreground hover:bg-accent/50 hover:text-foreground transition-colors"
+                  title={t('Switch to floating mode')}
+                >
+                  <RectangleEllipsis className="h-3.5 w-3.5" />
+                  {t('Switch to floating mode')}
+                </button>
+              </div>
+              <div className="flex-1 overflow-hidden">
+                <SettingsContent
+                  activeCategory={settingsCategory}
+                  onCategoryChange={onCategoryChange}
+                  scrollToProvider={scrollToProvider}
+                />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
 
       {/* Diff Review Modal */}

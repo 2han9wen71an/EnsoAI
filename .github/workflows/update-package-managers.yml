@@ -365,3 +365,120 @@ jobs:
             --head "J3n5en:${BRANCH}" \
             --title "New version: J3n5en.EnsoAI version ${VERSION}" \
             --body "" || echo "PR may already exist"
+
+  update-aur:
+    name: Update AUR
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set Version
+        id: version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            TAG="${{ github.event.inputs.tag }}"
+          elif [ -n "${{ inputs.tag }}" ]; then
+            TAG="${{ inputs.tag }}"
+          else
+            TAG="${{ github.event.release.tag_name }}"
+          fi
+          VERSION="${TAG#v}"
+          echo "tag=$TAG" >> $GITHUB_OUTPUT
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+
+      - name: Wait for release assets
+        run: sleep 60
+
+      - name: Calculate source tarball SHA256
+        id: sha
+        run: |
+          VERSION="${{ steps.version.outputs.version }}"
+          TAG="${{ steps.version.outputs.tag }}"
+          echo "Downloading source tarball..."
+          curl -sLO "https://github.com/J3n5en/EnsoAI/archive/refs/tags/${TAG}.tar.gz"
+          SHA=$(sha256sum "${TAG}.tar.gz" | cut -d' ' -f1)
+          echo "SHA256: $SHA"
+          echo "sha256=$SHA" >> $GITHUB_OUTPUT
+
+      - name: Generate PKGBUILD
+        env:
+          PKGVER: ${{ steps.version.outputs.version }}
+          SHA256: ${{ steps.sha.outputs.sha256 }}
+        run: |
+          cat > PKGBUILD << 'PKGBUILD_EOF'
+          pkgname=ensoai
+          pkgver=PKGVER_PLACEHOLDER
+          pkgrel=1
+          pkgdesc="Multiple AI Agents, Parallel Workflow - Git worktree manager with AI integration"
+          arch=('x86_64')
+          url="https://github.com/J3n5en/EnsoAI"
+          license=('MIT')
+          depends=('electron39')
+          makedepends=('nodejs>=20' 'pnpm>=10' 'git' 'libxcrypt-compat')
+          optdepends=(
+              'claude-cli: Claude AI agent support'
+              'codex: Codex AI agent support'
+              'cursor: Cursor AI agent support'
+          )
+          source=("$pkgname-$pkgver.tar.gz::$url/archive/v$pkgver.tar.gz")
+          sha256sums=('SHA256_PLACEHOLDER')
+
+          prepare() {
+              cd "$srcdir/EnsoAI-$pkgver"
+              sed -i '/"name":/a\  "homepage": "https://github.com/J3n5en/EnsoAI",' package.json
+              export ELECTRON_SKIP_BINARY_DOWNLOAD=1
+              pnpm install --frozen-lockfile
+          }
+
+          build() {
+              cd "$srcdir/EnsoAI-$pkgver"
+              export NODE_ENV=production
+              pnpm build:linux
+          }
+
+          package() {
+              cd "$srcdir/EnsoAI-$pkgver"
+              install -dm755 "$pkgdir/usr/lib/$pkgname"
+              if [ -d "dist/linux-unpacked/resources" ]; then
+                  cp -r dist/linux-unpacked/resources "$pkgdir/usr/lib/$pkgname/"
+              fi
+              install -dm755 "$pkgdir/usr/bin"
+              cat > "$pkgdir/usr/bin/$pkgname" << 'EOF'
+          #!/bin/sh
+          exec electron39 /usr/lib/ensoai/resources/app.asar "$@"
+          EOF
+              chmod +x "$pkgdir/usr/bin/$pkgname"
+              install -dm755 "$pkgdir/usr/share/applications"
+              cat > "$pkgdir/usr/share/applications/$pkgname.desktop" << EOF
+          [Desktop Entry]
+          Name=EnsoAI
+          Comment=Multiple AI Agents, Parallel Workflow
+          Exec=$pkgname %U
+          Icon=$pkgname
+          Type=Application
+          Categories=Development;Utility;IDE;
+          Terminal=false
+          StartupWMClass=EnsoAI
+          StartupWMClass=enso-ai
+          EOF
+              if [ -f "build/icon.png" ]; then
+                  install -Dm644 build/icon.png "$pkgdir/usr/share/pixmaps/$pkgname.png"
+              elif [ -f "resources/icon.png" ]; then
+                  install -Dm644 resources/icon.png "$pkgdir/usr/share/pixmaps/$pkgname.png"
+              fi
+              install -Dm644 LICENSE "$pkgdir/usr/share/licenses/$pkgname/LICENSE"
+          }
+          PKGBUILD_EOF
+          sed -i 's/^          //' PKGBUILD
+          sed -i "s/PKGVER_PLACEHOLDER/${PKGVER}/" PKGBUILD
+          sed -i "s/SHA256_PLACEHOLDER/${SHA256}/" PKGBUILD
+
+      - name: Publish to AUR
+        uses: KSXGitHub/github-actions-deploy-aur@v4.1.1
+        with:
+          pkgname: ensoai
+          pkgbuild: ./PKGBUILD
+          updpkgsums: true
+          commit_username: github-actions[bot]
+          commit_email: github-actions[bot]@users.noreply.github.com
+          ssh_private_key: ${{ secrets.AUR_SSH_PRIVATE_KEY }}
+          commit_message: "Update to ${{ steps.version.outputs.version }}"
+          ssh_keyscan_types: rsa,ecdsa,ed25519

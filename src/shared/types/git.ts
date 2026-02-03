@@ -9,6 +9,11 @@ export interface GitStatus {
   deleted: string[];
   untracked: string[];
   conflicted: string[];
+  /**
+   * 变更数量过大时，为避免卡顿/内存暴涨，仅返回前 N 条文件路径。
+   */
+  truncated?: boolean;
+  truncatedLimit?: number;
 }
 
 export interface GitBranch {
@@ -16,6 +21,7 @@ export interface GitBranch {
   current: boolean;
   commit: string;
   label: string;
+  merged?: boolean;
 }
 
 export interface GitLogEntry {
@@ -50,6 +56,11 @@ export interface FileChange {
 export interface FileChangesResult {
   changes: FileChange[];
   skippedDirs?: string[]; // Directories skipped for performance (e.g., node_modules not in .gitignore)
+  /**
+   * 变更数量过大时，为避免卡顿/内存暴涨，仅返回前 N 条变更。
+   */
+  truncated?: boolean;
+  truncatedLimit?: number;
 }
 
 export interface FileDiff {
@@ -107,4 +118,29 @@ export interface CloneResult {
 export interface ValidateUrlResult {
   valid: boolean;
   repoName?: string;
+}
+
+// Git Submodule types
+export type SubmoduleStatus =
+  | 'clean' // 干净
+  | 'modified' // 有本地修改
+  | 'outdated' // 需要更新
+  | 'uninitialized'; // 未初始化
+
+export interface GitSubmodule {
+  name: string;
+  path: string;
+  url: string;
+  branch?: string;
+  head: string;
+  status: SubmoduleStatus;
+  initialized: boolean;
+  // 远程同步状态
+  tracking?: string;
+  ahead: number;
+  behind: number;
+  // 本地变更状态
+  hasChanges: boolean;
+  stagedCount: number;
+  unstagedCount: number;
 }

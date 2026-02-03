@@ -14,6 +14,7 @@ interface ShellTerminalProps {
   initialCommand?: string;
   onExit?: () => void;
   onTitleChange?: (title: string) => void;
+  onInit?: (ptyId: string) => void;
   onSplit?: () => void;
   onMerge?: () => void;
 }
@@ -25,10 +26,22 @@ export function ShellTerminal({
   initialCommand,
   onExit,
   onTitleChange,
+  onInit,
   onSplit,
   onMerge,
 }: ShellTerminalProps) {
   const { t } = useI18n();
+
+  // Handle Shift+Enter for newline (send LF character)
+  const handleCustomKey = useCallback((event: KeyboardEvent, ptyId: string) => {
+    if (event.key === 'Enter' && event.shiftKey) {
+      if (event.type === 'keydown') {
+        window.electronAPI.terminal.write(ptyId, '\x0a');
+      }
+      return false; // Prevent default Enter behavior
+    }
+    return true;
+  }, []);
 
   const {
     containerRef,
@@ -46,9 +59,11 @@ export function ShellTerminal({
     initialCommand,
     onExit,
     onTitleChange,
+    onInit,
     onSplit,
     onMerge,
     canMerge,
+    onCustomKey: handleCustomKey,
   });
   const [isSearchOpen, setIsSearchOpen] = useState(false);
   const searchBarRef = useRef<TerminalSearchBarRef>(null);
@@ -148,7 +163,7 @@ export function ShellTerminal({
       className="relative h-full w-full"
       style={{ backgroundColor: settings.theme.background, contain: 'strict' }}
     >
-      <div ref={containerRef} className="h-full w-full px-[5px] py-[2px]" />
+      <div ref={containerRef} className="h-full w-full" />
       <TerminalSearchBar
         ref={searchBarRef}
         isOpen={isSearchOpen}

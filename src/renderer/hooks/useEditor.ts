@@ -33,7 +33,9 @@ export function useEditor() {
 
   const saveFile = useMutation({
     mutationFn: async (path: string) => {
-      const file = tabs.find((f) => f.path === path);
+      // Get latest tabs from store to avoid stale closure issue
+      const currentTabs = useEditorStore.getState().tabs;
+      const file = currentTabs.find((f) => f.path === path);
       if (!file) throw new Error('File not found');
       await window.electronAPI.file.write(path, file.content, file.encoding);
       markFileSaved(path);
@@ -45,7 +47,13 @@ export function useEditor() {
 
   // Load file and navigate to specific line/column
   const navigateToFile = useCallback(
-    async (path: string, line?: number, column?: number, matchLength?: number) => {
+    async (
+      path: string,
+      line?: number,
+      column?: number,
+      matchLength?: number,
+      previewMode?: 'off' | 'split' | 'fullscreen'
+    ) => {
       const existingTab = tabs.find((t) => t.path === path);
 
       if (existingTab) {
@@ -61,7 +69,7 @@ export function useEditor() {
 
       // Set pending cursor position if line is specified
       if (line !== undefined) {
-        setPendingCursor({ path, line, column, matchLength });
+        setPendingCursor({ path, line, column, matchLength, previewMode });
       }
     },
     [tabs, setActiveFile, openFile, setPendingCursor]

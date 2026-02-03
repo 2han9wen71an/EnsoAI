@@ -32,6 +32,26 @@ export const IPC_CHANNELS = {
   GIT_CLONE: 'git:clone',
   GIT_CLONE_PROGRESS: 'git:clone:progress',
   GIT_VALIDATE_URL: 'git:validate-url',
+  // Git Auto Fetch
+  GIT_AUTO_FETCH_SET_ENABLED: 'git:autoFetch:setEnabled',
+  GIT_AUTO_FETCH_COMPLETED: 'git:autoFetch:completed',
+
+  // Git Submodule
+  GIT_SUBMODULE_LIST: 'git:submodule:list',
+  GIT_SUBMODULE_INIT: 'git:submodule:init',
+  GIT_SUBMODULE_UPDATE: 'git:submodule:update',
+  GIT_SUBMODULE_SYNC: 'git:submodule:sync',
+  GIT_SUBMODULE_FETCH: 'git:submodule:fetch',
+  GIT_SUBMODULE_PULL: 'git:submodule:pull',
+  GIT_SUBMODULE_PUSH: 'git:submodule:push',
+  GIT_SUBMODULE_COMMIT: 'git:submodule:commit',
+  GIT_SUBMODULE_STAGE: 'git:submodule:stage',
+  GIT_SUBMODULE_UNSTAGE: 'git:submodule:unstage',
+  GIT_SUBMODULE_DISCARD: 'git:submodule:discard',
+  GIT_SUBMODULE_CHANGES: 'git:submodule:changes',
+  GIT_SUBMODULE_FILE_DIFF: 'git:submodule:file-diff',
+  GIT_SUBMODULE_BRANCHES: 'git:submodule:branches',
+  GIT_SUBMODULE_CHECKOUT: 'git:submodule:checkout',
 
   // Worktree
   WORKTREE_LIST: 'worktree:list',
@@ -53,9 +73,14 @@ export const IPC_CHANNELS = {
   FILE_CREATE_DIR: 'file:createDir',
   FILE_RENAME: 'file:rename',
   FILE_MOVE: 'file:move',
+  FILE_COPY: 'file:copy',
+  FILE_BATCH_MOVE: 'file:batchMove',
+  FILE_BATCH_COPY: 'file:batchCopy',
+  FILE_CHECK_CONFLICTS: 'file:checkConflicts',
   FILE_DELETE: 'file:delete',
   FILE_LIST: 'file:list',
   FILE_EXISTS: 'file:exists',
+  FILE_REVEAL_IN_FILE_MANAGER: 'file:revealInFileManager',
   FILE_WATCH_START: 'file:watch:start',
   FILE_WATCH_STOP: 'file:watch:stop',
   FILE_CHANGE: 'file:change',
@@ -72,6 +97,7 @@ export const IPC_CHANNELS = {
   // Agent
   AGENT_LIST: 'agent:list',
   AGENT_STOP_NOTIFICATION: 'agent:stop:notification',
+  AGENT_ASK_USER_QUESTION_NOTIFICATION: 'agent:askUserQuestion:notification',
   AGENT_STATUS_UPDATE: 'agent:status:update',
 
   // App
@@ -143,6 +169,8 @@ export const IPC_CHANNELS = {
   MCP_STOP_HOOK_SET: 'mcp:stopHook:set',
   MCP_STATUSLINE_HOOK_SET: 'mcp:statusLineHook:set',
   MCP_STATUSLINE_HOOK_STATUS: 'mcp:statusLineHook:status',
+  MCP_PERMISSION_REQUEST_HOOK_SET: 'mcp:permissionRequestHook:set',
+  MCP_PERMISSION_REQUEST_HOOK_STATUS: 'mcp:permissionRequestHook:status',
 
   // Claude Provider
   CLAUDE_PROVIDER_READ_SETTINGS: 'claude:provider:readSettings',

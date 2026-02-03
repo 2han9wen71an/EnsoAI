@@ -41,6 +41,7 @@ export interface UseXtermOptions {
   onData?: (data: string) => void;
   onCustomKey?: (event: KeyboardEvent, ptyId: string) => boolean;
   onTitleChange?: (title: string) => void;
+  onInit?: (ptyId: string) => void;
   onSplit?: () => void;
   onMerge?: () => void;
   canMerge?: boolean;
@@ -82,6 +83,7 @@ function useTerminalSettings() {
     terminalFontWeight,
     terminalFontWeightBold,
     terminalScrollback,
+    terminalOptionIsMeta,
     xtermKeybindings,
   } = useSettingsStore();
 
@@ -96,6 +98,7 @@ function useTerminalSettings() {
     fontWeight: terminalFontWeight,
     fontWeightBold: terminalFontWeightBold,
     scrollback: terminalScrollback,
+    optionIsMeta: terminalOptionIsMeta,
     xtermKeybindings,
   };
 }
@@ -110,6 +113,7 @@ export function useXterm({
   onData,
   onCustomKey,
   onTitleChange,
+  onInit,
   onSplit,
   onMerge,
   canMerge = false,
@@ -137,6 +141,8 @@ export function useXterm({
   onCustomKeyRef.current = onCustomKey;
   const onTitleChangeRef = useRef(onTitleChange);
   onTitleChangeRef.current = onTitleChange;
+  const onInitRef = useRef(onInit);
+  onInitRef.current = onInit;
   const onSplitRef = useRef(onSplit);
   onSplitRef.current = onSplit;
   const onMergeRef = useRef(onMerge);
@@ -270,6 +276,7 @@ export function useXterm({
       fontWeightBold: settings.fontWeightBold,
       theme: settings.theme,
       scrollback: settings.scrollback,
+      macOptionIsMeta: settings.optionIsMeta,
       allowProposedApi: true,
       allowTransparency: false,
       rescaleOverlappingGlyphs: true,
@@ -373,10 +380,14 @@ export function useXterm({
               const exists = await window.electronAPI.file.exists(absolutePath);
               if (!exists) return;
 
+              // Check if it's a Markdown file
+              const isMarkdown = absolutePath.toLowerCase().endsWith('.md');
+
               navigateToFile({
                 path: absolutePath,
                 line: lineNum,
                 column: colNum,
+                previewMode: isMarkdown ? 'fullscreen' : undefined,
               });
             },
           });
@@ -416,15 +427,16 @@ export function useXterm({
           return false;
         }
       }
-      // Cmd/Ctrl+1-9 (switch to tab by number)
-      if (
-        (event.metaKey || event.ctrlKey) &&
-        !event.shiftKey &&
-        !event.altKey &&
-        event.key >= '1' &&
-        event.key <= '9'
-      ) {
-        return false;
+      // Cmd/Ctrl+1-9 or Option+1-9: let global shortcuts handle panel/tab switching
+      // Use event.code for keyboard layout independence (Option+1 may produce special chars)
+      const isDigit1to9 = event.code >= 'Digit1' && event.code <= 'Digit9';
+      if (isDigit1to9) {
+        const hasModifier =
+          ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey) ||
+          (event.altKey && !event.metaKey && !event.ctrlKey && !event.shiftKey);
+        if (hasModifier) {
+          return false;
+        }
       }
 
       // Handle copy - paste is NOT intercepted to allow image paste in agents
@@ -504,6 +516,9 @@ export function useXterm({
       });
 
       ptyIdRef.current = ptyId;
+
+      // Call onInit callback with ptyId
+      onInitRef.current?.(ptyId);
 
       // Handle data from pty with debounced buffering for smooth rendering
       // 30ms delay merges fragmented TUI packets (clear + write)

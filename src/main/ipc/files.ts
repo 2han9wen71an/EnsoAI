@@ -1,7 +1,7 @@
-import { mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
-import { dirname, join, relative } from 'node:path';
+import { copyFile, mkdir, readdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
+import { basename, dirname, join, relative } from 'node:path';
 import { type FileEntry, type FileReadResult, IPC_CHANNELS } from '@shared/types';
-import { BrowserWindow, ipcMain } from 'electron';
+import { BrowserWindow, ipcMain, shell } from 'electron';
 import iconv from 'iconv-lite';
 import jschardet from 'jschardet';
 import simpleGit from 'simple-git';
@@ -59,6 +59,7 @@ function detectEncoding(buffer: Buffer): { encoding: string; confidence: number 
 }
 
 const watchers = new Map<string, FileWatcher>();
+const watcherCleanups = new Map<string, () => void>();
 
 /**
  * Stop all file watchers for paths under the given directory
@@ -69,8 +70,10 @@ export async function stopWatchersInDirectory(dirPath: string): Promise<void> {
   for (const [path, watcher] of watchers.entries()) {
     const normalizedPath = path.replace(/\\/g, '/').toLowerCase();
     if (normalizedPath === normalizedDir || normalizedPath.startsWith(`${normalizedDir}/`)) {
+      watcherCleanups.get(path)?.();
       await watcher.stop();
       watchers.delete(path);
+      watcherCleanups.delete(path);
     }
   }
 }
@@ -138,6 +141,13 @@ export function registerFileHandlers(): void {
   });
 
   ipcMain.handle(
+    IPC_CHANNELS.FILE_REVEAL_IN_FILE_MANAGER,
+    async (_, filePath: string): Promise<void> => {
+      shell.showItemInFolder(filePath);
+    }
+  );
+
+  ipcMain.handle(
     IPC_CHANNELS.FILE_LIST,
     async (_, dirPath: string, gitRoot?: string): Promise<FileEntry[]> => {
       if (gitRoot) {
@@ -197,23 +207,278 @@ export function registerFileHandlers(): void {
       return;
     }
 
-    const watcher = new FileWatcher(dirPath, (eventType, path) => {
-      if (!window.isDestroyed()) {
-        window.webContents.send(IPC_CHANNELS.FILE_CHANGE, { type: eventType, path });
+    const MAX_PENDING_EVENTS = 5000;
+    const MAX_FLUSH_EVENTS = 500;
+    const FLUSH_DELAY_MS = 100;
+
+    const pendingEvents = new Map<string, 'create' | 'update' | 'delete'>();
+    let bulkMode = false;
+    let flushTimer: NodeJS.Timeout | null = null;
+
+    const cleanup = () => {
+      if (flushTimer) {
+        clearTimeout(flushTimer);
+        flushTimer = null;
       }
+      pendingEvents.clear();
+      bulkMode = false;
+    };
+
+    const scheduleFlush = () => {
+      if (flushTimer) return;
+      flushTimer = setTimeout(() => {
+        flushTimer = null;
+        if (window.isDestroyed()) {
+          cleanup();
+          return;
+        }
+
+        if (bulkMode || pendingEvents.size > MAX_FLUSH_EVENTS) {
+          const normalizedDir = dirPath.replace(/\\/g, '/');
+          window.webContents.send(IPC_CHANNELS.FILE_CHANGE, {
+            type: 'update',
+            path: `${normalizedDir}/.enso-bulk`,
+          });
+        } else {
+          for (const [path, type] of pendingEvents) {
+            window.webContents.send(IPC_CHANNELS.FILE_CHANGE, { type, path });
+          }
+        }
+
+        pendingEvents.clear();
+        bulkMode = false;
+      }, FLUSH_DELAY_MS);
+    };
+
+    const watcher = new FileWatcher(dirPath, (eventType, changedPath) => {
+      if (window.isDestroyed()) return;
+
+      if (bulkMode) {
+        scheduleFlush();
+        return;
+      }
+
+      const normalized = changedPath.replace(/\\/g, '/');
+      pendingEvents.set(normalized, eventType);
+      if (pendingEvents.size > MAX_PENDING_EVENTS) {
+        bulkMode = true;
+        pendingEvents.clear();
+      }
+      scheduleFlush();
     });
 
     await watcher.start();
     watchers.set(dirPath, watcher);
+    watcherCleanups.set(dirPath, cleanup);
   });
 
   ipcMain.handle(IPC_CHANNELS.FILE_WATCH_STOP, async (_, dirPath: string) => {
     const watcher = watchers.get(dirPath);
     if (watcher) {
+      watcherCleanups.get(dirPath)?.();
       await watcher.stop();
       watchers.delete(dirPath);
+      watcherCleanups.delete(dirPath);
     }
   });
+
+  // FILE_COPY: Copy a single file/directory
+  ipcMain.handle(IPC_CHANNELS.FILE_COPY, async (_, sourcePath: string, targetPath: string) => {
+    const sourceStats = await stat(sourcePath);
+
+    if (sourceStats.isDirectory()) {
+      // Recursively copy directory
+      await copyDirectory(sourcePath, targetPath);
+    } else {
+      // Copy single file
+      await mkdir(dirname(targetPath), { recursive: true });
+      await copyFile(sourcePath, targetPath);
+    }
+  });
+
+  // FILE_CHECK_CONFLICTS: Check which files already exist in target directory
+  ipcMain.handle(
+    IPC_CHANNELS.FILE_CHECK_CONFLICTS,
+    async (
+      _,
+      sources: string[],
+      targetDir: string
+    ): Promise<
+      Array<{
+        path: string;
+        name: string;
+        sourceSize: number;
+        targetSize: number;
+        sourceModified: number;
+        targetModified: number;
+      }>
+    > => {
+      const conflicts = [];
+
+      for (const sourcePath of sources) {
+        const sourceStats = await stat(sourcePath);
+        const fileName = basename(sourcePath);
+        const targetPath = join(targetDir, fileName);
+
+        try {
+          const targetStats = await stat(targetPath);
+          conflicts.push({
+            path: sourcePath,
+            name: fileName,
+            sourceSize: sourceStats.size,
+            targetSize: targetStats.size,
+            sourceModified: sourceStats.mtimeMs,
+            targetModified: targetStats.mtimeMs,
+          });
+        } catch {
+          // Target doesn't exist, no conflict
+        }
+      }
+
+      return conflicts;
+    }
+  );
+
+  // FILE_BATCH_COPY: Copy multiple files/directories with conflict resolution
+  ipcMain.handle(
+    IPC_CHANNELS.FILE_BATCH_COPY,
+    async (
+      _,
+      sources: string[],
+      targetDir: string,
+      conflicts: Array<{ path: string; action: 'replace' | 'skip' | 'rename'; newName?: string }>
+    ): Promise<{ success: string[]; failed: Array<{ path: string; error: string }> }> => {
+      const success: string[] = [];
+      const failed: Array<{ path: string; error: string }> = [];
+
+      // Build conflict resolution map
+      const conflictMap = new Map(conflicts.map((c) => [c.path, c]));
+
+      for (const sourcePath of sources) {
+        try {
+          const fileName = basename(sourcePath);
+          let targetPath = join(targetDir, fileName);
+          const conflict = conflictMap.get(sourcePath);
+
+          if (conflict) {
+            if (conflict.action === 'skip') {
+              continue;
+            }
+            if (conflict.action === 'rename' && conflict.newName) {
+              targetPath = join(targetDir, conflict.newName);
+            }
+            // 'replace' action: just overwrite
+          }
+
+          const sourceStats = await stat(sourcePath);
+
+          if (sourceStats.isDirectory()) {
+            await copyDirectory(sourcePath, targetPath);
+          } else {
+            await mkdir(dirname(targetPath), { recursive: true });
+            await copyFile(sourcePath, targetPath);
+          }
+
+          success.push(sourcePath);
+        } catch (error) {
+          failed.push({
+            path: sourcePath,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
+        }
+      }
+
+      return { success, failed };
+    }
+  );
+
+  // FILE_BATCH_MOVE: Move multiple files/directories with conflict resolution
+  ipcMain.handle(
+    IPC_CHANNELS.FILE_BATCH_MOVE,
+    async (
+      _,
+      sources: string[],
+      targetDir: string,
+      conflicts: Array<{ path: string; action: 'replace' | 'skip' | 'rename'; newName?: string }>
+    ): Promise<{ success: string[]; failed: Array<{ path: string; error: string }> }> => {
+      const success: string[] = [];
+      const failed: Array<{ path: string; error: string }> = [];
+
+      const conflictMap = new Map(conflicts.map((c) => [c.path, c]));
+
+      for (const sourcePath of sources) {
+        try {
+          const fileName = basename(sourcePath);
+          let targetPath = join(targetDir, fileName);
+          const conflict = conflictMap.get(sourcePath);
+
+          if (conflict) {
+            if (conflict.action === 'skip') {
+              continue;
+            }
+            if (conflict.action === 'rename' && conflict.newName) {
+              targetPath = join(targetDir, conflict.newName);
+            }
+            // 'replace' action: delete existing first
+            if (conflict.action === 'replace') {
+              try {
+                await rm(targetPath, { recursive: true, force: true });
+              } catch {
+                // Ignore if target doesn't exist
+              }
+            }
+          }
+
+          try {
+            // Try rename first (works for same filesystem)
+            await rename(sourcePath, targetPath);
+          } catch {
+            // If rename fails (cross-filesystem), copy then delete
+            const sourceStats = await stat(sourcePath);
+
+            if (sourceStats.isDirectory()) {
+              await copyDirectory(sourcePath, targetPath);
+            } else {
+              await mkdir(dirname(targetPath), { recursive: true });
+              await copyFile(sourcePath, targetPath);
+            }
+
+            // Delete source after successful copy
+            await rm(sourcePath, { recursive: true, force: true });
+          }
+
+          success.push(sourcePath);
+        } catch (error) {
+          failed.push({
+            path: sourcePath,
+            error: error instanceof Error ? error.message : 'Unknown error',
+          });
+        }
+      }
+
+      return { success, failed };
+    }
+  );
+}
+
+/**
+ * Recursively copy a directory
+ */
+async function copyDirectory(source: string, target: string): Promise<void> {
+  await mkdir(target, { recursive: true });
+
+  const entries = await readdir(source, { withFileTypes: true });
+
+  for (const entry of entries) {
+    const sourcePath = join(source, entry.name);
+    const targetPath = join(target, entry.name);
+
+    if (entry.isDirectory()) {
+      await copyDirectory(sourcePath, targetPath);
+    } else {
+      await copyFile(sourcePath, targetPath);
+    }
+  }
 }
 
 export async function stopAllFileWatchers(): Promise<void> {
@@ -223,6 +488,10 @@ export async function stopAllFileWatchers(): Promise<void> {
   }
   await Promise.all(stopPromises);
   watchers.clear();
+  for (const cleanup of watcherCleanups.values()) {
+    cleanup();
+  }
+  watcherCleanups.clear();
 }
 
 /**
@@ -234,4 +503,8 @@ export function stopAllFileWatchersSync(): void {
     watcher.stop().catch(() => {});
   }
   watchers.clear();
+  for (const cleanup of watcherCleanups.values()) {
+    cleanup();
+  }
+  watcherCleanups.clear();
 }

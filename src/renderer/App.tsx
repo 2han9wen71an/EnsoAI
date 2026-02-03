@@ -7,7 +7,9 @@ import type {
 } from '@shared/types';
 import { AnimatePresence, motion } from 'framer-motion';
 import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
+import { consumeClaudeProviderSwitch, isClaudeProviderMatch } from '@/lib/claudeProvider';
 import { normalizeHexColor } from '@/lib/colors';
+import { cn } from '@/lib/utils';
 import {
   ALL_GROUP_ID,
   DEFAULT_GROUP_COLOR,
@@ -45,7 +47,8 @@ import { RepositorySidebar } from './components/layout/RepositorySidebar';
 import { TreeSidebar } from './components/layout/TreeSidebar';
 import { WindowTitleBar } from './components/layout/WindowTitleBar';
 import { WorktreePanel } from './components/layout/WorktreePanel';
-import { SettingsDialog } from './components/settings/SettingsDialog';
+import type { SettingsCategory } from './components/settings/constants';
+import { DraggableSettingsWindow } from './components/settings/DraggableSettingsWindow';
 import { UpdateNotification } from './components/UpdateNotification';
 import { Button } from './components/ui/button';
 import {
@@ -59,7 +62,8 @@ import {
 import { addToast, toastManager } from './components/ui/toast';
 import { MergeEditor, MergeWorktreeDialog } from './components/worktree';
 import { useEditor } from './hooks/useEditor';
-import { useGitBranches, useGitInit } from './hooks/useGit';
+import { useAutoFetchListener, useGitBranches, useGitInit } from './hooks/useGit';
+import { useWebInspector } from './hooks/useWebInspector';
 import {
   useWorktreeCreate,
   useWorktreeList,
@@ -71,18 +75,24 @@ import {
 } from './hooks/useWorktree';
 import { useI18n } from './i18n';
 import { initCloneProgressListener } from './stores/cloneTasks';
+import { useCodeReviewContinueStore } from './stores/codeReviewContinue';
 import { useEditorStore } from './stores/editor';
 import { useInitScriptStore } from './stores/initScript';
 import { useNavigationStore } from './stores/navigation';
 import { useSettingsStore } from './stores/settings';
 import { requestUnsavedChoice } from './stores/unsavedPrompt';
 import { useWorktreeStore } from './stores/worktree';
+import { useWorktreeActivityStore } from './stores/worktreeActivity';
 
 // Initialize global clone progress listener
 initCloneProgressListener();
 
 export default function App() {
   const { t } = useI18n();
+
+  // Listen for auto-fetch completion events to refresh git status
+  useAutoFetchListener();
+
   // Per-worktree tab state: { [worktreePath]: TabId }
   const [worktreeTabMap, setWorktreeTabMap] = useState<Record<string, TabId>>(getStoredTabMap);
   // Per-repo worktree state: { [repoPath]: worktreePath }
@@ -94,6 +104,7 @@ export default function App() {
   // Panel tab order: custom order of tabs
   const [tabOrder, setTabOrder] = useState<TabId[]>(getStoredTabOrder);
   const [activeTab, setActiveTab] = useState<TabId>('chat');
+  const [previousTab, setPreviousTab] = useState<TabId | null>(null);
   const [repositories, setRepositories] = useState<Repository[]>([]);
   const [selectedRepo, setSelectedRepo] = useState<string | null>(null);
   const [activeWorktree, setActiveWorktree] = useState<GitWorktree | null>(null);
@@ -108,18 +119,124 @@ export default function App() {
     getStoredBoolean(STORAGE_KEYS.WORKTREE_COLLAPSED, false)
   );
 
-  // Settings dialog state
-  const [settingsOpen, setSettingsOpen] = useState(false);
-  const [settingsCategory, setSettingsCategory] = useState<
-    'general' | 'appearance' | 'editor' | 'keybindings' | 'agent' | 'integration' | 'hapi'
-  >('general');
+  // Ref to toggle selected repo expanded in tree layout
+  const toggleSelectedRepoExpandedRef = useRef<(() => void) | null>(null);
+
+  // Ref for cross-repo worktree switching (defined later)
+  const switchWorktreePathRef = useRef<((path: string) => void) | null>(null);
+
+  // Settings page state (used in MainContent)
+  const [settingsCategory, setSettingsCategory] = useState<SettingsCategory>(() => {
+    try {
+      const saved = localStorage.getItem('enso-settings-active-category');
+      const validCategories: SettingsCategory[] = [
+        'general',
+        'appearance',
+        'editor',
+        'keybindings',
+        'agent',
+        'ai',
+        'integration',
+        'hapi',
+      ];
+      return saved && validCategories.includes(saved as SettingsCategory)
+        ? (saved as SettingsCategory)
+        : 'general';
+    } catch {
+      return 'general';
+    }
+  });
   const [scrollToProvider, setScrollToProvider] = useState(false);
+  const [pendingProviderAction, setPendingProviderAction] = useState<'preview' | 'save' | null>(
+    null
+  );
+
+  // 持久化状态变更
+  useEffect(() => {
+    try {
+      localStorage.setItem('enso-settings-active-category', settingsCategory);
+    } catch (error) {
+      console.warn('Failed to save settings category:', error);
+    }
+  }, [settingsCategory]);
+
+  // Global drag-and-drop for repository sidebar
+  const [isFileDragOver, setIsFileDragOver] = useState(false);
+  const repositorySidebarRef = useRef<HTMLDivElement>(null);
+  const isFileDragOverRef = useRef(false);
+
+  // Keep ref in sync with state for use in event handlers
+  useEffect(() => {
+    isFileDragOverRef.current = isFileDragOver;
+  }, [isFileDragOver]);
+
+  useEffect(() => {
+    const handleDragOver = (e: DragEvent) => {
+      if (!e.dataTransfer?.types.includes('Files')) return;
+      e.preventDefault();
+      e.dataTransfer.dropEffect = 'copy';
+
+      // Check if over sidebar
+      const el = repositorySidebarRef.current;
+      if (el) {
+        const rect = el.getBoundingClientRect();
+        const over =
+          e.clientX >= rect.left &&
+          e.clientX <= rect.right &&
+          e.clientY >= rect.top &&
+          e.clientY <= rect.bottom;
+        setIsFileDragOver(over);
+      }
+    };
+
+    const handleDragLeave = (e: DragEvent) => {
+      if (e.clientX <= 0 || e.clientY <= 0) {
+        setIsFileDragOver(false);
+      }
+    };
+
+    const handleDrop = (e: DragEvent) => {
+      e.preventDefault();
+      const wasOver = isFileDragOverRef.current;
+      setIsFileDragOver(false);
+
+      if (wasOver && e.dataTransfer?.files.length) {
+        const file = e.dataTransfer.files[0];
+        const path = window.electronAPI.utils.getPathForFile(file);
+        if (path) {
+          setInitialLocalPath(path);
+          setAddRepoDialogOpen(true);
+        }
+      }
+    };
+
+    document.addEventListener('dragover', handleDragOver);
+    document.addEventListener('dragleave', handleDragLeave);
+    document.addEventListener('drop', handleDrop);
+    return () => {
+      document.removeEventListener('dragover', handleDragOver);
+      document.removeEventListener('dragleave', handleDragLeave);
+      document.removeEventListener('drop', handleDrop);
+    };
+  }, []);
+
+  // 创建回调函数
+  const handleSettingsCategoryChange = useCallback((category: SettingsCategory) => {
+    setSettingsCategory(category);
+  }, []);
 
   // Add Repository dialog state
   const [addRepoDialogOpen, setAddRepoDialogOpen] = useState(false);
+  const [initialLocalPath, setInitialLocalPath] = useState<string | null>(null);
 
   // Action panel state
   const [actionPanelOpen, setActionPanelOpen] = useState(false);
+
+  // Settings dialog state (for draggable-modal mode)
+  const [settingsDialogOpen, setSettingsDialogOpen] = useState(false);
+
+  // Track previous settingsDisplayMode to detect actual changes (not just initialization)
+  const prevSettingsDisplayModeRef = useRef<typeof settingsDisplayMode | null>(null);
 
   // Close confirmation dialog state (legacy)
   const [closeDialogOpen, setCloseDialogOpen] = useState(false);
@@ -138,6 +255,7 @@ export default function App() {
   const layoutMode = useSettingsStore((s) => s.layoutMode);
   const autoUpdateEnabled = useSettingsStore((s) => s.autoUpdateEnabled);
   const editorSettings = useSettingsStore((s) => s.editorSettings);
+  const settingsDisplayMode = useSettingsStore((s) => s.settingsDisplayMode);
 
   // Panel resize hook
   const { repositoryWidth, worktreeWidth, treeSidebarWidth, resizing, handleResizeStart } =
@@ -151,10 +269,42 @@ export default function App() {
   const { pendingNavigation, clearNavigation } = useNavigationStore();
   const { navigateToFile } = useEditor();
 
+  const openSettings = useCallback(() => {
+    if (settingsDisplayMode === 'tab') {
+      if (activeTab !== 'settings') {
+        setPreviousTab(activeTab);
+        setActiveTab('settings');
+      }
+    } else {
+      setSettingsDialogOpen(true);
+    }
+  }, [settingsDisplayMode, activeTab]);
+
+  // Toggle settings page
+  const toggleSettings = useCallback(() => {
+    if (settingsDisplayMode === 'tab') {
+      // Tab mode: toggle between settings and previous tab
+      if (activeTab === 'settings') {
+        setActiveTab(previousTab || 'chat');
+        setPreviousTab(null);
+      } else {
+        setPreviousTab(activeTab);
+        setActiveTab('settings');
+      }
+    } else {
+      // Draggable-modal mode: toggle dialog
+      setSettingsDialogOpen((prev) => !prev);
+    }
+  }, [settingsDisplayMode, activeTab, previousTab]);
+
   // Handle tab change and persist to worktree tab map
   const handleTabChange = useCallback(
     (tab: TabId) => {
       setActiveTab(tab);
+      // Clear previousTab when switching away from settings via tab bar
+      if (activeTab === 'settings') {
+        setPreviousTab(null);
+      }
       // Save tab state for current worktree
       if (activeWorktree?.path) {
         setWorktreeTabMap((prev) => ({
@@ -163,24 +313,111 @@ export default function App() {
         }));
       }
     },
-    [activeWorktree]
+    [activeTab, activeWorktree]
   );
+
+  // Clean up settings state when display mode changes and open settings in new mode
+  // biome-ignore lint/correctness/useExhaustiveDependencies: Only trigger on display mode change, not on activeTab/previousTab change
+  useEffect(() => {
+    // Only trigger when settingsDisplayMode actually changes (not on initial mount or rehydration)
+    const prevMode = prevSettingsDisplayModeRef.current;
+    prevSettingsDisplayModeRef.current = settingsDisplayMode;
+
+    // Skip if this is the first run (prevMode is null) - no mode switch happened
+    if (prevMode === null) {
+      return;
+    }
+
+    // Skip if the mode hasn't actually changed
+    if (prevMode === settingsDisplayMode) {
+      return;
+    }
+
+    if (settingsDisplayMode === 'tab') {
+      // Switching to tab mode: close dialog and open settings tab
+      setSettingsDialogOpen(false);
+      // Open settings tab if not already active
+      if (activeTab !== 'settings') {
+        setPreviousTab(activeTab);
+        setActiveTab('settings');
+      }
+    } else {
+      // Switching to draggable-modal mode: exit settings tab and open modal
+      if (activeTab === 'settings') {
+        setActiveTab(previousTab || 'chat');
+        setPreviousTab(null);
+      }
+      // Open modal
+      setSettingsDialogOpen(true);
+    }
+  }, [settingsDisplayMode]);
+
+  // Listen for 'open-settings-provider' event from SessionBar
+  useEffect(() => {
+    const handleOpenSettingsProvider = () => {
+      setSettingsCategory('integration');
+      setScrollToProvider(true);
+      openSettings();
+    };
+
+    window.addEventListener('open-settings-provider', handleOpenSettingsProvider);
+    return () => {
+      window.removeEventListener('open-settings-provider', handleOpenSettingsProvider);
+    };
+  }, [openSettings]);
 
   // Keyboard shortcuts
   useAppKeyboardShortcuts({
     activeWorktreePath: activeWorktree?.path,
     onTabSwitch: handleTabChange,
     onActionPanelToggle: useCallback(() => setActionPanelOpen((prev) => !prev), []),
+    onToggleWorktree: useCallback(() => {
+      // In tree layout, toggle selected repo expanded; in columns layout, toggle worktree panel
+      if (layoutMode === 'tree') {
+        toggleSelectedRepoExpandedRef.current?.();
+      } else {
+        setWorktreeCollapsed((prev) => !prev);
+      }
+    }, [layoutMode]),
+    onToggleRepository: useCallback(() => setRepositoryCollapsed((prev) => !prev), []),
+    onSwitchActiveWorktree: useCallback(() => {
+      const activities = useWorktreeActivityStore.getState().activities;
+
+      // 获取所有有活跃 agent 会话的 worktree 路径（跨所有仓库）
+      const activeWorktreePaths = Object.entries(activities)
+        .filter(([, activity]) => activity.agentCount > 0)
+        .map(([path]) => path)
+        .sort(); // 确保顺序稳定
+
+      // 边界检查：少于 2 个活跃 worktree 时无需切换
+      if (activeWorktreePaths.length < 2) {
+        return;
+      }
+
+      // 找到当前 worktree 在列表中的位置
+      const currentPath = activeWorktree?.path ?? '';
+      const currentIndex = activeWorktreePaths.indexOf(currentPath);
+
+      // 计算下一个索引（循环）
+      const nextIndex = currentIndex === -1 ? 0 : (currentIndex + 1) % activeWorktreePaths.length;
+
+      // 切换到下一个 worktree（使用 ref 调用跨仓库切换函数）
+      const nextWorktreePath = activeWorktreePaths[nextIndex];
+      switchWorktreePathRef.current?.(nextWorktreePath);
+    }, [activeWorktree?.path]),
   });
+
+  // Web Inspector: listen for element inspection data and write to active agent terminal
+  useWebInspector(activeWorktree?.path, selectedRepo ?? undefined);
 
   // Handle terminal file link navigation
   useEffect(() => {
     if (!pendingNavigation) return;
 
-    const { path, line, column } = pendingNavigation;
+    const { path, line, column, previewMode } = pendingNavigation;
 
-    // Open the file and set cursor position
-    navigateToFile(path, line, column);
+    // Open the file and set cursor position, passing previewMode for markdown files
+    navigateToFile(path, line, column, undefined, previewMode);
 
     // Switch to file tab and update worktree tab map
     setActiveTab('file');
@@ -200,7 +437,7 @@ export default function App() {
     const cleanup = window.electronAPI.menu.onAction((action) => {
       switch (action) {
         case 'open-settings':
-          setSettingsOpen(true);
+          openSettings();
           break;
         case 'open-action-panel':
           setActionPanelOpen(true);
@@ -208,7 +445,7 @@ export default function App() {
       }
     });
     return cleanup;
-  }, []);
+  }, [openSettings]);
 
   // Listen for close request from main process (native dialogs are shown in main)
   useEffect(() => {
@@ -269,15 +506,17 @@ export default function App() {
       const { extracted } = data;
       if (!extracted?.baseUrl) return;
 
+      if (consumeClaudeProviderSwitch(extracted)) {
+        return;
+      }
+
       // Close previous provider toast if exists
       if (providerToastRef.current) {
         toastManager.close(providerToastRef.current);
       }
 
       // Check if the new config matches any saved provider
-      const matched = claudeProviders.find(
-        (p) => p.baseUrl === extracted.baseUrl && p.authToken === extracted.authToken
-      );
+      const matched = claudeProviders.find((p) => isClaudeProviderMatch(p, extracted));
 
       if (matched) {
         // Switched to a known provider
@@ -292,14 +531,36 @@ export default function App() {
           type: 'info',
           title: t('New provider detected'),
           description: t('Click to save this config'),
-          actionProps: {
-            children: t('Open Settings'),
-            onClick: () => {
-              setSettingsCategory('integration');
-              setScrollToProvider(true);
-              setSettingsOpen(true);
+          actions: [
+            {
+              label: t('Preview'),
+              onClick: () => {
+                setSettingsCategory('integration');
+                setScrollToProvider(true);
+                openSettings();
+                setPendingProviderAction('preview');
+              },
+              variant: 'ghost',
             },
-          },
+            {
+              label: t('Save'),
+              onClick: () => {
+                setSettingsCategory('integration');
+                setScrollToProvider(true);
+                openSettings();
+                setPendingProviderAction('save');
+              },
+              variant: 'outline',
+            },
+            {
+              label: t('Open Settings'),
+              onClick: () => {
+                setSettingsCategory('integration');
+                setScrollToProvider(true);
+                openSettings();
+              },
+            },
+          ],
         });
       }
     });
@@ -312,7 +573,7 @@ export default function App() {
       }
       cleanup();
     };
-  }, [claudeProviders, t]);
+  }, [claudeProviders, t, openSettings]);
 
   // Save collapsed states to localStorage
   useEffect(() => {
@@ -655,6 +916,18 @@ export default function App() {
     window.electronAPI.mcp.setStatusLineHookEnabled(claudeCodeIntegration.statusLineEnabled);
   }, [claudeCodeIntegration.statusLineEnabled]);
 
+  // Listen for code review continue conversation request
+  const shouldSwitchToChatTab = useCodeReviewContinueStore(
+    (s) => s.continueConversation.shouldSwitchToChatTab
+  );
+  const clearChatTabSwitch = useCodeReviewContinueStore((s) => s.clearChatTabSwitch);
+  useEffect(() => {
+    if (shouldSwitchToChatTab && activeWorktree) {
+      handleTabChange('chat');
+      clearChatTabSwitch();
+    }
+  }, [shouldSwitchToChatTab, activeWorktree, clearChatTabSwitch, handleTabChange]);
+
   // Sync activeWorktree with loaded worktrees data
   useEffect(() => {
     if (worktrees.length > 0 && activeWorktree) {
@@ -779,6 +1052,9 @@ export default function App() {
     [worktrees, repositories, worktreeTabMap, handleSelectWorktree]
   );
 
+  // Assign to ref for use in keyboard shortcut callback
+  switchWorktreePathRef.current = handleSwitchWorktreePath;
+
   // Open add repository dialog
   const handleAddRepository = () => {
     setAddRepoDialogOpen(true);
@@ -874,27 +1150,62 @@ export default function App() {
     }
   };
 
-  const handleRemoveWorktree = async (
+  const handleRemoveWorktree = (
     worktree: GitWorktree,
     options?: { deleteBranch?: boolean; force?: boolean }
   ) => {
     if (!selectedRepo) return;
-    await removeWorktreeMutation.mutateAsync({
-      workdir: selectedRepo,
-      options: {
-        path: worktree.path,
-        force: worktree.prunable || options?.force, // prunable or user-selected force delete
-        deleteBranch: options?.deleteBranch,
-        branch: worktree.branch || undefined,
-      },
+
+    // Show loading toast
+    const toastId = toastManager.add({
+      type: 'loading',
+      title: t('Deleting...'),
+      description: worktree.branch || worktree.path,
+      timeout: 0,
     });
-    // Clear editor state for the removed worktree
-    clearEditorWorktreeState(worktree.path);
-    // Clear selection if the active worktree was removed.
-    if (activeWorktree?.path === worktree.path) {
-      setActiveWorktree(null);
-    }
-    refetchBranches();
+
+    // Execute deletion asynchronously (non-blocking)
+    removeWorktreeMutation
+      .mutateAsync({
+        workdir: selectedRepo,
+        options: {
+          path: worktree.path,
+          force: worktree.prunable || options?.force,
+          deleteBranch: options?.deleteBranch,
+          branch: worktree.branch || undefined,
+        },
+      })
+      .then(() => {
+        // Clear editor state for the removed worktree
+        clearEditorWorktreeState(worktree.path);
+        // Clear selection if the active worktree was removed
+        if (activeWorktree?.path === worktree.path) {
+          setActiveWorktree(null);
+        }
+        refetchBranches();
+
+        // Show success toast
+        toastManager.close(toastId);
+        toastManager.add({
+          type: 'success',
+          title: t('Worktree deleted'),
+          description: worktree.branch || worktree.path,
+        });
+      })
+      .catch((err) => {
+        const message = err instanceof Error ? err.message : String(err);
+        const hasUncommitted = message.includes('modified or untracked');
+
+        // Show error toast
+        toastManager.close(toastId);
+        toastManager.add({
+          type: 'error',
+          title: t('Delete failed'),
+          description: hasUncommitted
+            ? t('This directory contains uncommitted changes. Please check "Force delete".')
+            : message,
+        });
+      });
   };
 
   const handleInitGit = async () => {
@@ -999,10 +1310,27 @@ export default function App() {
     return window.electronAPI.worktree.getConflictContent(selectedRepo, file);
   };
 
+  useEffect(() => {
+    const isSettingsOpen =
+      (settingsDisplayMode === 'tab' && activeTab === 'settings') ||
+      (settingsDisplayMode === 'draggable-modal' && settingsDialogOpen);
+
+    if (!isSettingsOpen) return;
+    if (!pendingProviderAction) return;
+
+    const eventName =
+      pendingProviderAction === 'preview'
+        ? 'open-settings-provider-preview'
+        : 'open-settings-provider-save';
+
+    window.dispatchEvent(new CustomEvent(eventName));
+    setPendingProviderAction(null);
+  }, [settingsDisplayMode, settingsDialogOpen, activeTab, pendingProviderAction]);
+
   return (
     <div className="flex h-screen flex-col overflow-hidden">
       {/* Custom Title Bar for Windows/Linux */}
-      <WindowTitleBar onOpenSettings={() => setSettingsOpen(true)} />
+      <WindowTitleBar onOpenSettings={openSettings} />
 
       {/* Main Layout */}
       <div className={`flex flex-1 overflow-hidden ${resizing ? 'select-none' : ''}`}>
@@ -1011,6 +1339,7 @@ export default function App() {
           <AnimatePresence initial={false}>
             {!repositoryCollapsed && (
               <motion.div
+                ref={repositorySidebarRef}
                 key="tree-sidebar"
                 initial={{ width: 0, opacity: 0 }}
                 animate={{ width: treeSidebarWidth, opacity: 1 }}
@@ -1041,7 +1370,7 @@ export default function App() {
                     refetchBranches();
                   }}
                   onInitGit={handleInitGit}
-                  onOpenSettings={() => setSettingsOpen(true)}
+                  onOpenSettings={openSettings}
                   collapsed={false}
                   onCollapse={() => setRepositoryCollapsed(true)}
                   groups={sortedGroups}
@@ -1053,6 +1382,10 @@ export default function App() {
                   onMoveToGroup={handleMoveToGroup}
                   onSwitchTab={setActiveTab}
                   onSwitchWorktreeByPath={handleSwitchWorktreePath}
+                  toggleSelectedRepoExpandedRef={toggleSelectedRepoExpandedRef}
+                  isSettingsActive={activeTab === 'settings'}
+                  onToggleSettings={toggleSettings}
+                  isFileDragOver={isFileDragOver}
                 />
                 {/* Resize handle */}
                 <div
@@ -1069,6 +1402,7 @@ export default function App() {
             <AnimatePresence initial={false}>
               {!repositoryCollapsed && (
                 <motion.div
+                  ref={repositorySidebarRef}
                   key="repository"
                   initial={{ width: 0, opacity: 0 }}
                   animate={{ width: repositoryWidth, opacity: 1 }}
@@ -1083,7 +1417,7 @@ export default function App() {
                     onAddRepository={handleAddRepository}
                     onRemoveRepository={handleRemoveRepository}
                     onReorderRepositories={handleReorderRepositories}
-                    onOpenSettings={() => setSettingsOpen(true)}
+                    onOpenSettings={openSettings}
                     collapsed={false}
                     onCollapse={() => setRepositoryCollapsed(true)}
                     groups={sortedGroups}
@@ -1095,6 +1429,9 @@ export default function App() {
                     onMoveToGroup={handleMoveToGroup}
                     onSwitchTab={setActiveTab}
                     onSwitchWorktreeByPath={handleSwitchWorktreePath}
+                    isSettingsActive={activeTab === 'settings'}
+                    onToggleSettings={toggleSettings}
+                    isFileDragOver={isFileDragOver}
                   />
                   {/* Resize handle */}
                   <div
@@ -1170,20 +1507,14 @@ export default function App() {
           }
           onSwitchWorktree={handleSwitchWorktreePath}
           onSwitchTab={handleTabChange}
-        />
-
-        {/* Global Settings Dialog */}
-        <SettingsDialog
-          open={settingsOpen}
-          onOpenChange={(open) => {
-            setSettingsOpen(open);
-            if (!open) {
-              // Reset scroll flag when dialog closes
-              setScrollToProvider(false);
-            }
-          }}
-          initialCategory={settingsCategory}
+          isSettingsActive={
+            (settingsDisplayMode === 'tab' && activeTab === 'settings') ||
+            (settingsDisplayMode === 'draggable-modal' && settingsDialogOpen)
+          }
+          settingsCategory={settingsCategory}
+          onCategoryChange={handleSettingsCategoryChange}
           scrollToProvider={scrollToProvider}
+          onToggleSettings={toggleSettings}
         />
 
         {/* Add Repository Dialog */}
@@ -1194,6 +1525,9 @@ export default function App() {
           defaultGroupId={activeGroupId === ALL_GROUP_ID ? null : activeGroupId}
           onAddLocal={handleAddLocalRepository}
           onCloneComplete={handleCloneRepository}
+          onCreateGroup={handleCreateGroup}
+          initialLocalPath={initialLocalPath ?? undefined}
+          onClearInitialLocalPath={() => setInitialLocalPath(null)}
         />
 
         {/* Action Panel */}
@@ -1209,7 +1543,7 @@ export default function App() {
           activeWorktreePath={activeWorktree?.path}
           onToggleRepository={() => setRepositoryCollapsed((prev) => !prev)}
           onToggleWorktree={() => setWorktreeCollapsed((prev) => !prev)}
-          onOpenSettings={() => setSettingsOpen(true)}
+          onOpenSettings={openSettings}
           onSwitchRepo={handleSelectRepo}
           onSwitchWorktree={handleSelectWorktree}
         />
@@ -1300,6 +1634,17 @@ export default function App() {
 
         {/* Clone Progress Float - shows clone progress in bottom right corner */}
         <CloneProgressFloat onCloneComplete={handleCloneRepository} />
+
+        {/* Draggable Settings Window (for draggable-modal mode) */}
+        {settingsDisplayMode === 'draggable-modal' && (
+          <DraggableSettingsWindow
+            open={settingsDialogOpen}
+            onOpenChange={setSettingsDialogOpen}
+            activeCategory={settingsCategory}
+            onCategoryChange={handleSettingsCategoryChange}
+            scrollToProvider={scrollToProvider}
+          />
+        )}
       </div>
     </div>
   );

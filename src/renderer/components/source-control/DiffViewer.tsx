@@ -102,6 +102,7 @@ function getLanguageFromPath(filePath: string): string {
 interface DiffViewerProps {
   rootPath: string;
   file: { path: string; staged: boolean } | null;
+  isActive?: boolean;
   onPrevFile?: () => void;
   onNextFile?: () => void;
   hasPrevFile?: boolean;
@@ -115,6 +116,7 @@ interface DiffViewerProps {
 export function DiffViewer({
   rootPath,
   file,
+  isActive = true,
   onPrevFile,
   onNextFile,
   hasPrevFile = false,
@@ -223,8 +225,8 @@ export function DiffViewer({
 
       // Send comment to terminal
       const message = text
-        ? `@${file.path}#L${lineNumber}\nUser comment: "${text}"`
-        : `@${file.path}#L${lineNumber}`;
+        ? `${file.path}#L${lineNumber}\nUser comment: "${text}"`
+        : `${file.path}#L${lineNumber}`;
       write(sessionId, `${message}\r`);
 
       // Close comment form
@@ -463,14 +465,14 @@ export function DiffViewer({
               return;
             }
 
-            // Format: @path#L1-L10 or @path#L5
+            // Format: path#L1-L10 or path#L5
             const lineRef =
               selection.startLineNumber === selection.endLineNumber
                 ? `L${selection.startLineNumber}`
                 : `L${selection.startLineNumber}-L${selection.endLineNumber}`;
             const message = text
-              ? `@${file.path}#${lineRef}\nUser comment: "${text}"`
-              : `@${file.path}#${lineRef}`;
+              ? `${file.path}#${lineRef}\nUser comment: "${text}"`
+              : `${file.path}#${lineRef}`;
             write(sessionId, `${message}\r`);
 
             // Close comment widget
@@ -949,16 +951,23 @@ export function DiffViewer({
 
   useEffect(() => {
     const handleKeyDown = (e: KeyboardEvent) => {
+      if (!isActive) return;
       if (!file) return;
+      if (e.isComposing) return;
+
+      const activeElement = document.activeElement;
+      if (activeElement?.hasAttribute('data-keybinding-recording')) return;
 
       if (matchesKeybinding(e, sourceControlKeybindings.prevDiff)) {
         e.preventDefault();
+        e.stopPropagation();
         navigateToDiff('prev');
         return;
       }
 
       if (matchesKeybinding(e, sourceControlKeybindings.nextDiff)) {
         e.preventDefault();
+        e.stopPropagation();
         navigateToDiff('next');
         return;
       }
@@ -970,9 +979,9 @@ export function DiffViewer({
       }
     };
 
-    window.addEventListener('keydown', handleKeyDown);
-    return () => window.removeEventListener('keydown', handleKeyDown);
-  }, [file, navigateToDiff, sourceControlKeybindings, isEditing, isDirty, handleSave]);
+    window.addEventListener('keydown', handleKeyDown, true);
+    return () => window.removeEventListener('keydown', handleKeyDown, true);
+  }, [isActive, file, navigateToDiff, sourceControlKeybindings, isEditing, isDirty, handleSave]);
 
   // biome-ignore lint/correctness/useExhaustiveDependencies: intentionally trigger on file change
   useEffect(() => {
